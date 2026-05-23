@@ -1,0 +1,86 @@
+name: nightly
+
+# Drift detection: build sd.cpp against its latest upstream HEAD (NOT the
+# pinned submodule) on both target OSes once a week. Catches upstream API
+# breakage before a release tag tries to bump the submodule.
+#
+# On failure, opens an issue tagged `area:vendor`.
+
+on:
+  schedule:
+    - cron: '0 4 * * 1' # Monday 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  CUDA_VERSION: '12.5.0'
+
+jobs:
+  drift:
+    name: sd.cpp upstream (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Fast-forward sd.cpp to master HEAD
+        shell: bash
+        run: |
+          cd vendor/stable-diffusion.cpp
+          git fetch origin
+          git checkout origin/master
+          git submodule update --init --recursive
+
+      - name: Install CUDA Toolkit
+        if: matrix.os == 'windows-2022'
+        uses: Jimver/cuda-toolkit@v0.2.18
+        with:
+          cuda: ${{ env.CUDA_VERSION }}
+          method: 'network'
+          sub-packages: '["nvcc","cudart","cublas","cublas_dev"]'
+
+      - name: Build (macOS Metal)
+        if: matrix.os == 'macos-14'
+        run: bash scripts/build-sdcpp-mac.sh
+
+      - name: Build (Windows CUDA)
+        if: matrix.os == 'windows-2022'
+        shell: pwsh
+        run: pwsh scripts/build-sdcpp-win.ps1
+
+      - name: Smoke
+        shell: bash
+        run: |
+          BIN="frontend/src-tauri/binaries/sd-${{ matrix.target }}"
+          if [ "${{ matrix.os }}" = "windows-2022" ]; then BIN="${BIN}.exe"; fi
+          test -x "$BIN"
+          "$BIN" --help | head -5 || true
+
+      - name: Open issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const target = '${{ matrix.target }}';
+            const date = new Date().toISOString().slice(0, 10);
+            const title = `nightly: sd.cpp upstream broke (${target}, ${date})`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body: `Nightly build of \`stable-diffusion.cpp\` master HEAD failed on ${target}.\n\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n\nPinned submodule SHA is still good; this is upstream drift. Investigate before bumping.`,
+              labels: ['area:vendor', 'bug'],
+            });

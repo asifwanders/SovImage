@@ -1,0 +1,58 @@
+[package]
+name = "sovimage"
+version = "0.1.0"
+description = "Local AI image generation desktop app."
+authors = ["asifwanders"]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/asifwanders/SovImage"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = { version = "2", features = [] }
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-os = "2"
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+futures-util = "0.3"
+thiserror = "1"
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+
+# Networking + integrity for the resilient model downloader.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2"] }
+sha2 = "0.10"
+
+# NVIDIA VRAM probe — Windows-only.
+[target.'cfg(windows)'.dependencies]
+nvml-wrapper = "0.10"
+windows-sys = { version = "0.60", features = ["Win32_System_SystemInformation"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = ["stub_runtime"]
+# Mock downloader + sidecar — UI testable without sd.cpp / real models.
+# Disable with `--no-default-features` to compile the real runtime that
+# probes hardware, downloads GGUFs over HTTP Range, and spawns sd.cpp.
+stub_runtime = []
+real_runtime = []
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+incremental = false
+opt-level = 3
+strip = true

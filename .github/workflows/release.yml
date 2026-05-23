@@ -1,0 +1,181 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build artifacts without creating a Release'
+        required: false
+        default: 'true'
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: 20
+  RUST_BACKTRACE: 1
+  # Pinned for reproducibility; bump intentionally.
+  CUDA_VERSION: '12.5.0'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1) Build stable-diffusion.cpp once per target. Output uploaded as an
+  #    artifact for the app job to consume.
+  # ---------------------------------------------------------------------------
+  build-sdcpp:
+    name: sd.cpp (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            sd_binary: sd
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            sd_binary: sd.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Cache sd.cpp build
+        id: sdcpp_cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            vendor/sdcpp-build-mac
+            vendor/sdcpp-build-win
+            frontend/src-tauri/binaries
+          key: sdcpp-${{ matrix.target }}-${{ hashFiles('.gitmodules', 'vendor/stable-diffusion.cpp/CMakeLists.txt', 'scripts/build-sdcpp-*') }}
+
+      # ---- macOS: Metal build ----
+      - name: Build sd.cpp (Metal)
+        if: matrix.os == 'macos-14' && steps.sdcpp_cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-sdcpp-mac.sh
+
+      # ---- Windows: CUDA build ----
+      - name: Install CUDA Toolkit
+        if: matrix.os == 'windows-2022' && steps.sdcpp_cache.outputs.cache-hit != 'true'
+        uses: Jimver/cuda-toolkit@v0.2.18
+        with:
+          cuda: ${{ env.CUDA_VERSION }}
+          method: 'network'
+          sub-packages: '["nvcc","cudart","cublas","cublas_dev"]'
+
+      - name: Build sd.cpp (CUDA)
+        if: matrix.os == 'windows-2022' && steps.sdcpp_cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: pwsh scripts/build-sdcpp-win.ps1
+
+      - name: Verify sd binary
+        shell: bash
+        run: |
+          ls -la frontend/src-tauri/binaries/
+          test -f "frontend/src-tauri/binaries/sd-${{ matrix.target }}${{ matrix.os == 'windows-2022' && '.exe' || '' }}" \
+            || (echo "missing binary"; exit 1)
+
+      - name: Upload sd.cpp artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-${{ matrix.target }}
+          path: frontend/src-tauri/binaries/sd-${{ matrix.target }}*
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # 2) Build the Tauri app per target. Pulls the matching sd.cpp artifact and
+  #    drops it in src-tauri/binaries/ before tauri-action bundles.
+  # ---------------------------------------------------------------------------
+  build-app:
+    name: app (${{ matrix.target }})
+    needs: build-sdcpp
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            args: '--target aarch64-apple-darwin'
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            args: '--target x86_64-pc-windows-msvc'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust target
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: 'frontend/src-tauri -> target'
+          key: ${{ matrix.target }}
+
+      - name: Download sd.cpp artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sd-${{ matrix.target }}
+          path: frontend/src-tauri/binaries
+
+      - name: Mark sd binary executable (macOS)
+        if: matrix.os == 'macos-14'
+        run: chmod +x frontend/src-tauri/binaries/sd-${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Tauri build
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Apple signing secrets — optional this sprint. Empty values are
+          # treated as "skip signing" by tauri-action.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Windows signing — optional this sprint.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: frontend
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('dev-{0}', github.run_number) }}
+          releaseName: 'SovImage ${{ github.ref_type == ''tag'' && github.ref_name || format(''dev build {0}'', github.run_number) }}'
+          releaseDraft: true
+          prerelease: ${{ github.ref_type != 'tag' }}
+          args: ${{ matrix.args }}
+          includeUpdaterJson: false
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ matrix.target }}
+          path: |
+            frontend/src-tauri/target/${{ matrix.target }}/release/build/**/output
+            frontend/src-tauri/target/${{ matrix.target }}/release/bundle
+          if-no-files-found: ignore
+          retention-days: 7

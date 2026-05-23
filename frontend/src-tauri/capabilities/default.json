@@ -1,0 +1,26 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for SovImage windows.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "dialog:default",
+    "fs:default",
+    "os:allow-platform",
+    "os:allow-arch",
+    "os:allow-version",
+    "sql:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/sd",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    }
+  ]
+}

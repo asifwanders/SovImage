@@ -1,0 +1,40 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels: ["deps", "area:frontend"]
+    groups:
+      tauri-plugins:
+        patterns: ["@tauri-apps/plugin-*"]
+      tauri-core:
+        patterns: ["@tauri-apps/api", "@tauri-apps/cli"]
+      next-react:
+        patterns: ["next", "react", "react-dom", "@types/react*"]
+
+  - package-ecosystem: cargo
+    directory: /frontend/src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels: ["deps", "area:rust"]
+    groups:
+      tauri-plugins:
+        patterns: ["tauri-plugin-*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    labels: ["deps", "area:ci"]

@@ -1,0 +1,40 @@
+# Auto-label PRs by path. Wired in .github/workflows/labels.yml.
+
+"area:frontend":
+  - changed-files:
+      - any-glob-to-any-file:
+          - frontend/src/**
+          - frontend/package.json
+          - frontend/next.config.ts
+          - frontend/tailwind.config.*
+          - frontend/postcss.config.*
+
+"area:rust":
+  - changed-files:
+      - any-glob-to-any-file:
+          - frontend/src-tauri/**
+
+"area:ci":
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
+
+"area:plan":
+  - changed-files:
+      - any-glob-to-any-file:
+          - plan/**
+
+"area:scripts":
+  - changed-files:
+      - any-glob-to-any-file:
+          - scripts/**
+
+"area:docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - README.md
+          - BUILDING.md
+          - CONTRIBUTING.md
+          - SECURITY.md
+          - CHANGELOG.md
+          - CODE_OF_CONDUCT.md
