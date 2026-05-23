@@ -67,7 +67,10 @@ jobs:
         with:
           cuda: ${{ env.CUDA_VERSION }}
           method: 'network'
-          sub-packages: '["nvcc","cudart","cublas","cublas_dev"]'
+          # `visual_studio_integration` ships the MSBuild .props files CMake
+          # needs to find the CUDA toolset on Windows; without it the build
+          # errors with "No CUDA toolset found" even though CUDA_PATH is set.
+          sub-packages: '["nvcc","cudart","cublas","cublas_dev","visual_studio_integration"]'
 
       - name: Build sd.cpp (CUDA)
         if: matrix.os == 'windows-2022' && steps.sdcpp_cache.outputs.cache-hit != 'true'

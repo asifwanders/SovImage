@@ -50,7 +50,7 @@ jobs:
         with:
           cuda: ${{ env.CUDA_VERSION }}
           method: 'network'
-          sub-packages: '["nvcc","cudart","cublas","cublas_dev"]'
+          sub-packages: '["nvcc","cudart","cublas","cublas_dev","visual_studio_integration"]'
 
       - name: Build (macOS Metal)
         if: matrix.os == 'macos-14'
