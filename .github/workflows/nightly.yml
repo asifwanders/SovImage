@@ -46,7 +46,7 @@ jobs:
 
       - name: Install CUDA Toolkit
         if: matrix.os == 'windows-2022'
-        uses: Jimver/cuda-toolkit@v0.2.18
+        uses: Jimver/cuda-toolkit@v0.2.35
         with:
           cuda: ${{ env.CUDA_VERSION }}
           method: 'network'

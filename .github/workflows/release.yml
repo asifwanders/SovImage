@@ -63,7 +63,7 @@ jobs:
       # ---- Windows: CUDA build ----
       - name: Install CUDA Toolkit
         if: matrix.os == 'windows-2022' && steps.sdcpp_cache.outputs.cache-hit != 'true'
-        uses: Jimver/cuda-toolkit@v0.2.18
+        uses: Jimver/cuda-toolkit@v0.2.35
         with:
           cuda: ${{ env.CUDA_VERSION }}
           method: 'network'
