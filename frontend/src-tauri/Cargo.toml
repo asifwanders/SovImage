@@ -35,7 +35,7 @@ sha2 = "0.10"
 
 # NVIDIA VRAM probe — Windows-only.
 [target.'cfg(windows)'.dependencies]
-nvml-wrapper = "0.10"
+nvml-wrapper = "0.12"
 windows-sys = { version = "0.60", features = ["Win32_System_SystemInformation"] }
 
 [dev-dependencies]
