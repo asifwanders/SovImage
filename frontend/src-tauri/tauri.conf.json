@@ -38,7 +38,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "category": "Graphics",
+    "category": "GraphicsDesign",
     "shortDescription": "Local AI image generation.",
     "longDescription": "SovImage runs Flux.1 image generation entirely on your device.",
     "externalBin": ["binaries/sd"],
