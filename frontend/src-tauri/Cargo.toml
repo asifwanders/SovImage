@@ -31,7 +31,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 
 # Networking + integrity for the resilient model downloader.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2"] }
-sha2 = "0.10"
+sha2 = "0.11"
 
 # NVIDIA VRAM probe — Windows-only.
 [target.'cfg(windows)'.dependencies]
