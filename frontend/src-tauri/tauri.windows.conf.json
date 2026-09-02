@@ -1,0 +1,23 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": false,
+    "resources": {
+      "resources/build-provenance.json": "build-provenance.json",
+      "resources/PrivacyInfo.xcprivacy": "PrivacyInfo.xcprivacy",
+      "../../LICENSE": "LICENSE",
+      "../../APACHE-2.0.txt": "APACHE-2.0.txt",
+      "../../DEPENDENCY_NOTICES.md": "DEPENDENCY_NOTICES.md",
+      "../../PRIVACY.md": "PRIVACY.md",
+      "../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "binaries/*.dll": "",
+      "binaries/sdcpp-runtime-manifest.json": "sdcpp-runtime-manifest.json"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

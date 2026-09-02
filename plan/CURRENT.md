@@ -1,79 +1,41 @@
-# Implementation Status
+# Current Implementation Status
 
-> Plan ≠ code, always. This file maps what's actually implemented vs what's
-> still aspirational in `plan/00-08`.
+Last reconciled with the 0.2.0 working tree: 2 September 2026.
 
-Last updated: 2026-05-24.
+## Implemented in code/config
 
-## Implemented
+| Area | Current state |
+|---|---|
+| Model family | FLUX.2 Klein 4B + small decoder + Qwen3; Apache-2.0 repositories |
+| Model integrity | immutable revisions, exact lengths, mandatory SHA-256 |
+| Engine | sd.cpp `6b3edaaf`; FLUX.2 prompt-file/backend/VRAM contract |
+| Hardware | Apple unified memory or one unambiguous NVIDIA GPU; 12 GiB minimum |
+| Storage | local SQLite plus APPLOCAL attachments/images/models/prompts and fail-closed legacy migration |
+| Security | strict CSP, no `$HOME` scope, no frontend process execution, pre-spawn sidecar reservation |
+| CI | locked frontend/Rust builds; exact engine/provenance; release assets |
+| Direct release | ad-hoc dry run; Developer ID/notarized and Authenticode public lane |
+| Mac App Store | sandbox/profile/helper/pkg/validation workflow; explicit upload |
+| Disclosure | privacy policy/manifest, security policy, bundled direct dependency/model notices |
 
-| Plan area                       | Status      | Notes |
-|---------------------------------|-------------|-------|
-| `plan/00` architecture          | matches     | repo layout, layered diagram both live |
-| `plan/01` frontend layout       | matches     | all routes, components, stores, design tokens |
-| `plan/02` SQLite schema         | matches     | v1 migration; FTS5; triggers all live |
-| `plan/03` Rust downloader       | matches     | Range, SHA256, state.json, backoff, cancel — all live |
-| `plan/04` sidecar (old draft)   | superseded  | see plan/08 |
-| `plan/05` design system         | matches     | tokens replicated from SovLens |
-| `plan/06` sd.cpp execution      | matches     | argv builder w/ per-tier flags |
-| `plan/07` CI/CD pipeline        | matches     | release.yml + ci.yml; matrix split into build-sdcpp + build-app |
-| `plan/08` sidecar protocol      | matches     | run() supervisor, parse_step, tokio::select cancel |
+## Still requires external or device evidence
 
-## Diverges from plan
+- Apple and Windows signing credentials are not stored in the repository.
+- App Store Connect registration, metadata, agreements, screenshots, privacy
+  answers, TestFlight processing, device matrix, and App Review remain human/external gates.
+- Provider-policy review must settle the App Store privacy label; the complete
+  transitive/NVIDIA license inventory and locked-advisory review remain
+  publication gates.
+- Product-name clearance and publisher ownership of the final reverse-DNS bundle
+  identifier remain pre-registration and publication gates.
+- Real FLUX.2 generation and reference editing must pass on representative
+  12/16/24/32 GiB Macs and 12/16/24 GiB NVIDIA systems before publication.
+- Windows CUDA runtime closure must pass on a clean NVIDIA machine, not merely a
+  build runner.
+- Multi-GPU Windows testing must cover the documented full-UUID single-device
+  selection; numeric, abbreviated, multiple, and MIG selectors currently fail closed.
+- Exact model peak memory, latency, thermals, and quality need recorded benchmarks.
+- A public privacy/support URL must remain reachable at submission time.
 
-1. **DB IPC surface (plan/02)** — the plan listed `db_chats_list`, etc. as
-   Rust commands. In practice the frontend talks to `tauri-plugin-sql`
-   directly via `lib/db.ts`. Rust does NOT proxy DB queries. `Message`
-   struct still lives in `commands/db.rs` only as a shared serde shape for
-   `generate_image`'s return value.
-
-2. **Stub vs real runtime** — the Cargo feature `stub_runtime` is ON by
-   default. This was not in the original plan but became necessary to keep
-   `cargo tauri dev` + frontend CI passing without GGUF files present.
-   Real runtime is `--no-default-features`. Documented in BUILDING.md.
-
-3. **Generation message id ownership** — plan/04 implied Rust would mint
-   the message id and return it. In practice the **frontend** mints the
-   UUID (when inserting the SQLite placeholder row) and passes it through
-   to Rust's `generate_image(message_id, ...)`. Required so the frontend
-   can subscribe to `generation://<id>` events BEFORE the sidecar starts
-   emitting them. Rust validates the id shape.
-
-4. **DropOverlay** — plan/01 said the overlay would pass dropped files
-   directly to the Composer. In practice we introduced a tiny
-   `useAttachment` Zustand store as the shared channel, plus a
-   `lib/attachments.ts` helper that writes the dropped file to
-   `<app_data>/attachments/<uuid>.<ext>` and returns the absolute path.
-
-## Deferred
-
-| Item                                             | Where  | Why |
-|--------------------------------------------------|--------|-----|
-| Negative prompt UI (tier 3 only)                 | UI     | Flux-dev only; UI work pending |
-| Persistent sd.cpp server protocol                | sidecar| upstream not landed; per-prompt argv works |
-| FTS5 search UI (input + result list)             | UI     | backend live; UI form not yet wired |
-| Output directory picker in Settings              | UI     | wire `tauri-plugin-dialog::open` later |
-| `nightly.yml` for upstream sd.cpp drift          | CI     | needs HF token + storage; deferred |
-| Code signing (macOS Developer ID, Windows EV)    | CI     | secrets not yet provisioned |
-| Telemetry off-by-default crash counter           | both   | listed in settings; no transport implemented |
-| Cross-platform .deb / .AppImage for Linux        | CI     | not in current sprint scope |
-
-## Constraints / known limitations
-
-- Tier 1 8 GB Apple Silicon may swap heavily even with all flags on.
-  Documented in plan/06; splash should warn (UI not yet wired).
-- Windows on non-NVIDIA GPUs: profiler returns `supported = false`;
-  splash should render an "Unsupported hardware" panel (UI not yet wired).
-- sd.cpp sidecar is spawned per-prompt; model reload cost ~3–6 s on
-  Apple Silicon. Persistent-server mode (plan/08 future section) will
-  remove this when upstream supports it.
-
-## Pin reminders
-
-When updating:
-- `vendor/stable-diffusion.cpp` → bump `.gitmodules` comment + retest
-  argv compatibility against any sd.cpp CLI changes.
-- Frontend Next.js / React major versions → re-run full audit; the
-  static-export + `useSearchParams` Suspense pattern is fragile.
-- Tauri 2 minor → check `shell:allow-execute` capability shape; the
-  v2 docs are inconsistent re: bare-name vs externalBin-path.
+Plans describe contracts, but passing current code/tests/artifact inspection is
+the evidence. Do not mark a release deployed or App Store-ready from source
+configuration alone.

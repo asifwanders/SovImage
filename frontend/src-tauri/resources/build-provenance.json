@@ -1,0 +1,12 @@
+{
+  "schema": 2,
+  "channel": "development",
+  "buildNumber": "0",
+  "nodeVersion": "24.14.1",
+  "npmVersion": "11.11.0",
+  "sourceCommit": "0000000000000000000000000000000000000000",
+  "sourceRef": "generated-at-build",
+  "sourceDirty": true,
+  "engineCommit": "0000000000000000000000000000000000000000",
+  "engineRef": "generated-at-build"
+}

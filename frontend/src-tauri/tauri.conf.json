@@ -1,12 +1,12 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "SovImage",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.sovimage.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:3000",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "node ../scripts/write-build-provenance.mjs && npm run build",
     "frontendDist": "../out"
   },
   "app": {
@@ -21,16 +21,24 @@
         "fullscreen": false,
         "transparent": false,
         "decorations": true,
-        "center": true
+        "center": true,
+        "devtools": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' customprotocol: asset:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'",
+      "devCsp": "default-src 'self' customprotocol: asset:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; font-src 'self' data:; connect-src 'self' ws://localhost:3000 ipc: http://ipc.localhost asset: http://asset.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'",
+      "dangerousDisableAssetCspModification": false,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPLOCALDATA/attachments/**", "$APPLOCALDATA/images/**"]
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [],
+    "createUpdaterArtifacts": false,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -38,10 +46,19 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "category": "GraphicsDesign",
+    "category": "GraphicsAndDesign",
+    "homepage": "https://github.com/asifwanders/SovImage",
     "shortDescription": "Local AI image generation.",
-    "longDescription": "SovImage runs Flux.1 image generation entirely on your device.",
+    "longDescription": "SovImage runs FLUX.2 Klein image generation and editing entirely on your device.",
     "externalBin": ["binaries/sd"],
-    "resources": []
+    "resources": {
+      "resources/build-provenance.json": "build-provenance.json",
+      "resources/PrivacyInfo.xcprivacy": "PrivacyInfo.xcprivacy",
+      "../../LICENSE": "LICENSE",
+      "../../APACHE-2.0.txt": "APACHE-2.0.txt",
+      "../../DEPENDENCY_NOTICES.md": "DEPENDENCY_NOTICES.md",
+      "../../PRIVACY.md": "PRIVACY.md",
+      "../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    }
   }
 }

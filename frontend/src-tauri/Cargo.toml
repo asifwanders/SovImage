@@ -1,9 +1,10 @@
 [package]
 name = "sovimage"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local AI image generation desktop app."
 authors = ["asifwanders"]
 edition = "2021"
+rust-version = "1.98"
 license = "MIT"
 repository = "https://github.com/asifwanders/SovImage"
 
@@ -11,7 +12,7 @@ repository = "https://github.com/asifwanders/SovImage"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-shell = { version = "2", features = [] }
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
@@ -27,25 +28,36 @@ thiserror = "1"
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-
 # Networking + integrity for the resilient model downloader.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2"] }
 sha2 = "0.10"
+shared_child = "1.1"
+os_pipe = "1.2"
+# Already present transitively through Tauri; used directly to prove generated
+# PNGs are decodable before publishing them to chat history.
+png = "0.18"
 
-# NVIDIA VRAM probe — Windows-only.
+# statvfs for disk-space precheck on unix targets (mac + linux dev).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# NVIDIA VRAM probe + GetDiskFreeSpaceExW for disk-space precheck.
 [target.'cfg(windows)'.dependencies]
 nvml-wrapper = "0.10"
-windows-sys = { version = "0.60", features = ["Win32_System_SystemInformation"] }
+windows-sys = { version = "0.60", features = [
+    "Win32_Storage_FileSystem",
+    "Win32_Foundation",
+] }
 
 [dev-dependencies]
 tempfile = "3"
 
 [features]
-default = ["stub_runtime"]
-# Mock downloader + sidecar — UI testable without sd.cpp / real models.
-# Disable with `--no-default-features` to compile the real runtime that
-# probes hardware, downloads GGUFs over HTTP Range, and spawns sd.cpp.
+default = ["real_runtime"]
+# Real runtime — hw probe, HTTP-Range GGUF download, sd.cpp spawn.
+# Stub kept for dev parity: mock downloader + sidecar, UI testable without
+# sd.cpp / real models. Toggle with
+# `--no-default-features --features stub_runtime`.
 stub_runtime = []
 real_runtime = []
 

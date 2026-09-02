@@ -7,7 +7,13 @@ import type {
   MessageRole,
   MessageStatus,
   SearchHit,
+  GenerationMeta,
 } from "./types";
+import {
+  HIGHLIGHT_END,
+  HIGHLIGHT_START,
+  toFtsPhrase,
+} from "./search";
 
 // ---------------------------------------------------------------------------
 // Thin DB facade over `@tauri-apps/plugin-sql`. In a browser-dev (`next dev`)
@@ -19,6 +25,11 @@ import type {
 // ---------------------------------------------------------------------------
 
 const DB_URL = "sqlite:sovimage.db";
+
+export interface MediaPathMapping {
+  from: string;
+  to: string;
+}
 
 interface Driver {
   chatsList(): Promise<Chat[]>;
@@ -37,11 +48,15 @@ interface Driver {
   }): Promise<Message>;
   messageUpdate(
     id: string,
-    patch: Partial<Pick<Message, "status" | "imagePath" | "content">>,
+    patch: Partial<
+      Pick<Message, "status" | "imagePath" | "content" | "kind" | "meta">
+    >,
   ): Promise<void>;
+  reconcileInterrupted(): Promise<number>;
+  clearAll(resetSettings: boolean): Promise<void>;
+  migrateMediaPaths(mappings: MediaPathMapping[]): Promise<number>;
+  referencedFiles(): Promise<string[]>;
   search(query: string): Promise<SearchHit[]>;
-  settingGet(key: string): Promise<string | null>;
-  settingSet(key: string, value: string): Promise<void>;
 }
 
 let driverPromise: Promise<Driver> | null = null;
@@ -52,7 +67,11 @@ function isTauri() {
 
 export function db(): Promise<Driver> {
   if (!driverPromise) {
-    driverPromise = isTauri() ? sqliteDriver() : Promise.resolve(memoryDriver());
+    const pending = isTauri() ? sqliteDriver() : Promise.resolve(memoryDriver());
+    driverPromise = pending.catch((error) => {
+      driverPromise = null;
+      throw error;
+    });
   }
   return driverPromise;
 }
@@ -64,17 +83,50 @@ function now() {
   return new Date().toISOString();
 }
 
+function parseMeta(value: string | null): GenerationMeta | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<GenerationMeta>;
+    return parsed &&
+      typeof parsed.model === "string" &&
+      (parsed.mode === "txt2img" || parsed.mode === "edit") &&
+      typeof parsed.steps === "number" &&
+      typeof parsed.cfg === "number" &&
+      typeof parsed.guidance === "number" &&
+      typeof parsed.sampler === "string" &&
+      typeof parsed.seed === "number" &&
+      typeof parsed.width === "number" &&
+      typeof parsed.height === "number"
+      ? (parsed as GenerationMeta)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // SQLite driver — used inside Tauri.
 // ---------------------------------------------------------------------------
 
 async function sqliteDriver(): Promise<Driver> {
   const { default: Database } = await import("@tauri-apps/plugin-sql");
-  const sql = await Database.load(DB_URL);
-  // Per-connection PRAGMAs (cannot run inside the migration transaction).
+  // Surface load/migration failures in DevTools console — otherwise
+  // Windows packaged builds give a silent dead "New chat" button.
+  let sql: Awaited<ReturnType<typeof Database.load>>;
+  try {
+    sql = await Database.load(DB_URL);
+  } catch (err) {
+    console.error(
+      `[sovimage] Database.load failed url=${DB_URL} err=`,
+      err,
+      err instanceof Error ? err.message : String(err),
+    );
+    throw err;
+  }
+  // WAL is persistent for the database file. SQLx enables foreign keys on
+  // every pooled SQLite connection by default; deletion triggers in migration
+  // 2 keep cascades correct even if that default ever changes.
   await sql.execute("PRAGMA journal_mode = WAL");
-  await sql.execute("PRAGMA foreign_keys = ON");
-
   type ChatRow = {
     id: string;
     title: string;
@@ -110,7 +162,7 @@ async function sqliteDriver(): Promise<Driver> {
     kind: r.kind as MessageKind,
     content: r.content,
     imagePath: r.image_path,
-    meta: r.meta_json ? JSON.parse(r.meta_json) : null,
+    meta: parseMeta(r.meta_json),
     parentId: r.parent_id,
     status: r.status as MessageStatus,
     createdAt: r.created_at,
@@ -126,10 +178,27 @@ async function sqliteDriver(): Promise<Driver> {
     async chatsCreate(title) {
       const id = uid();
       const ts = now();
-      await sql.execute(
-        "INSERT INTO chats (id, title, created_at, updated_at, pinned, archived) VALUES ($1, $2, $3, $3, 0, 0)",
-        [id, title, ts],
-      );
+      // tauri-plugin-sql (sqlx sqlite) treats `$N` as POSITIONAL binds, so
+      // reusing `$3` for two columns fails with "parameter count mismatch".
+      // Pass `ts` twice as $3 + $4 explicitly.
+      const sqlText =
+        "INSERT INTO chats (id, title, created_at, updated_at, pinned, archived) VALUES ($1, $2, $3, $4, 0, 0)";
+      const params = [id, title, ts, ts];
+      try {
+        await sql.execute(sqlText, params);
+      } catch (err) {
+        // Log SQL + params before re-throw so a packaged-build failure is
+        // diagnosable from the DevTools console.
+        console.error(
+          "[sovimage] chatsCreate SQL failed sql=",
+          sqlText,
+          "params=",
+          params,
+          "err=",
+          err,
+        );
+        throw err;
+      }
       return {
         id,
         title,
@@ -150,7 +219,7 @@ async function sqliteDriver(): Promise<Driver> {
     },
     async messagesList(chatId) {
       const rows = await sql.select<MsgRow[]>(
-        "SELECT id, chat_id, role, kind, content, image_path, meta_json, parent_id, status, created_at FROM messages WHERE chat_id = $1 ORDER BY created_at",
+        "SELECT id, chat_id, role, kind, content, image_path, meta_json, parent_id, status, created_at FROM messages WHERE chat_id = $1 ORDER BY created_at, rowid",
         [chatId],
       );
       return rows.map(rowToMsg);
@@ -172,10 +241,6 @@ async function sqliteDriver(): Promise<Driver> {
           status,
           ts,
         ],
-      );
-      await sql.execute(
-        "UPDATE chats SET updated_at = $1 WHERE id = $2",
-        [ts, input.chatId],
       );
       return {
         id,
@@ -205,6 +270,14 @@ async function sqliteDriver(): Promise<Driver> {
         sets.push(`content = $${params.length + 1}`);
         params.push(patch.content);
       }
+      if (patch.kind !== undefined) {
+        sets.push(`kind = $${params.length + 1}`);
+        params.push(patch.kind);
+      }
+      if (patch.meta !== undefined) {
+        sets.push(`meta_json = $${params.length + 1}`);
+        params.push(patch.meta ? JSON.stringify(patch.meta) : null);
+      }
       if (sets.length === 0) return;
       params.push(id);
       await sql.execute(
@@ -215,8 +288,8 @@ async function sqliteDriver(): Promise<Driver> {
     async search(query) {
       type Hit = { message_id: string; chat_id: string; snippet: string };
       const rows = await sql.select<Hit[]>(
-        "SELECT message_id, chat_id, snippet(messages_fts, 0, '<b>', '</b>', '…', 16) AS snippet FROM messages_fts WHERE messages_fts MATCH $1 LIMIT 50",
-        [query],
+        "SELECT message_id, chat_id, snippet(messages_fts, 0, $1, $2, '…', 16) AS snippet FROM messages_fts WHERE messages_fts MATCH $3 LIMIT 50",
+        [HIGHLIGHT_START, HIGHLIGHT_END, toFtsPhrase(query)],
       );
       return rows.map((r) => ({
         messageId: r.message_id,
@@ -224,18 +297,38 @@ async function sqliteDriver(): Promise<Driver> {
         snippet: r.snippet,
       }));
     },
-    async settingGet(key) {
-      const rows = await sql.select<{ value: string }[]>(
-        "SELECT value FROM settings WHERE key = $1",
-        [key],
+    async reconcileInterrupted() {
+      const result = await sql.execute(
+        "UPDATE messages SET status = 'error', content = 'Interrupted by app restart.' WHERE status IN ('pending', 'queued')",
       );
-      return rows[0]?.value ?? null;
+      return result.rowsAffected;
     },
-    async settingSet(key, value) {
+    async clearAll(resetSettings) {
+      // Migration 2 turns this one statement into an atomic settings/chat
+      // clear, avoiding BEGIN/COMMIT calls that can land on different pooled
+      // connections.
       await sql.execute(
-        "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        [key, value],
+        "INSERT INTO clear_requests (id, reset_settings) VALUES (1, $1)",
+        [resetSettings ? 1 : 0],
       );
+    },
+    async referencedFiles() {
+      const rows = await sql.select<{ image_path: string }[]>(
+        "SELECT image_path FROM messages WHERE image_path IS NOT NULL",
+      );
+      return rows.map((row) => row.image_path);
+    },
+    async migrateMediaPaths(mappings) {
+      let changed = 0;
+      for (const mapping of mappings) {
+        if (mapping.from === mapping.to) continue;
+        const result = await sql.execute(
+          "UPDATE messages SET image_path = $1 WHERE image_path = $2",
+          [mapping.to, mapping.from],
+        );
+        changed += result.rowsAffected;
+      }
+      return changed;
     },
   };
 }
@@ -247,7 +340,6 @@ async function sqliteDriver(): Promise<Driver> {
 function memoryDriver(): Driver {
   const chats: Chat[] = [];
   const messages: Record<string, Message[]> = {};
-  const settings: Record<string, string> = {};
 
   return {
     async chatsList() {
@@ -308,6 +400,8 @@ function memoryDriver(): Driver {
           if (patch.status !== undefined) m.status = patch.status;
           if (patch.imagePath !== undefined) m.imagePath = patch.imagePath;
           if (patch.content !== undefined) m.content = patch.content;
+          if (patch.kind !== undefined) m.kind = patch.kind;
+          if (patch.meta !== undefined) m.meta = patch.meta;
           return;
         }
       }
@@ -315,11 +409,43 @@ function memoryDriver(): Driver {
     async search() {
       return [];
     },
-    async settingGet(key) {
-      return settings[key] ?? null;
+    async reconcileInterrupted() {
+      let changed = 0;
+      for (const list of Object.values(messages)) {
+        for (const message of list) {
+          if (message.status !== "pending" && message.status !== "queued") continue;
+          message.status = "error";
+          message.content = "Interrupted by app restart.";
+          changed++;
+        }
+      }
+      return changed;
     },
-    async settingSet(key, value) {
-      settings[key] = value;
+    async clearAll(resetSettings) {
+      chats.splice(0);
+      for (const key of Object.keys(messages)) delete messages[key];
+      if (resetSettings) {
+        // Browser preview has no persisted settings.
+      }
+    },
+    async referencedFiles() {
+      return Object.values(messages)
+        .flat()
+        .flatMap((message) => (message.imagePath ? [message.imagePath] : []));
+    },
+    async migrateMediaPaths(mappings) {
+      const paths = new Map(mappings.map((mapping) => [mapping.from, mapping.to]));
+      let changed = 0;
+      for (const list of Object.values(messages)) {
+        for (const message of list) {
+          if (!message.imagePath) continue;
+          const next = paths.get(message.imagePath);
+          if (!next || next === message.imagePath) continue;
+          message.imagePath = next;
+          changed++;
+        }
+      }
+      return changed;
     },
   };
 }

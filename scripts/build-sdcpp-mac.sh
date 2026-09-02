@@ -31,8 +31,9 @@ cmake -S "$SRC" -B "$BUILD" \
   -DSD_BUILD_SHARED_LIBS=OFF \
   -DSD_WEBP=OFF \
   -DSD_WEBM=OFF \
+  -DGGML_BLAS=OFF \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
 
 # Build only the CLI target; skip examples/tests/utility binaries to keep CI
 # wall-time tight and the cache footprint small.
@@ -54,10 +55,17 @@ cp "$CANDIDATE" "$OUT_BIN"
 chmod +x "$OUT_BIN"
 strip "$OUT_BIN" || true
 
-# Ad-hoc codesign so macOS Gatekeeper loads the inner binary even though the
-# outer .app is unsigned in this sprint. No Developer ID required.
+# Ad-hoc sign the standalone local build. Distribution lanes replace this
+# signature with Developer ID or the App Store helper signature.
 codesign --force --sign - "$OUT_BIN"
 
 echo "built: $OUT_BIN"
 file "$OUT_BIN"
-"$OUT_BIN" --help | head -3 || true
+EXPECTED_SHA="$(git -C "$SRC" rev-parse HEAD)"
+"$REPO_ROOT/scripts/verify-sdcpp-cli.sh" "$OUT_BIN" "$EXPECTED_SHA"
+
+MIN_OS="$(vtool -show-build "$OUT_BIN" | awk '/minos/{print $2; exit}')"
+if [[ "$MIN_OS" != "12.0" ]]; then
+  echo "error: sidecar minimum macOS is $MIN_OS, expected 12.0" >&2
+  exit 1
+fi

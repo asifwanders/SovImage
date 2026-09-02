@@ -6,9 +6,6 @@ pub enum AppError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("not implemented in this build")]
-    NotImplemented,
-
     #[error("{0}")]
     Other(String),
 }

@@ -13,6 +13,11 @@ interface ThemeState {
 }
 
 const KEY = "sovimage.theme";
+let initialized = false;
+
+function isTheme(value: string | null): value is Theme {
+  return value === "light" || value === "dark" || value === "system";
+}
 
 function applyResolved(t: Theme): "light" | "dark" {
   const sysDark =
@@ -30,8 +35,10 @@ export const useTheme = create<ThemeState>((set, get) => ({
   theme: "system",
   resolved: "light",
   init: () => {
-    if (typeof window === "undefined") return;
-    const stored = (localStorage.getItem(KEY) as Theme | null) ?? "system";
+    if (typeof window === "undefined" || initialized) return;
+    initialized = true;
+    const value = localStorage.getItem(KEY);
+    const stored = isTheme(value) ? value : "system";
     const resolved = applyResolved(stored);
     set({ theme: stored, resolved });
 

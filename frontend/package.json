@@ -1,10 +1,18 @@
 {
   "name": "sovimage-frontend",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
+  "type": "module",
+  "packageManager": "npm@11.11.0",
+  "engines": {
+    "node": "24.14.1",
+    "npm": "11.11.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types test/*.test.mjs",
     "start": "next start",
     "lint": "eslint",
     "tauri": "tauri",
@@ -20,9 +28,9 @@
     "@tauri-apps/plugin-sql": "^2.4.0",
     "framer-motion": "^12.39.0",
     "lucide-react": "^1.16.0",
-    "next": "16.2.6",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
+    "next": "16.3.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
@@ -32,7 +40,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

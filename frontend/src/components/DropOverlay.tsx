@@ -5,11 +5,13 @@ import { ImagePlus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSetup } from "@/lib/stores/setup";
 import { useAttachment } from "@/lib/stores/attachment";
-import { persistAttachment } from "@/lib/attachments";
+import { chatAcceptsAttachments } from "@/lib/stores/chats";
+import { useToasts } from "@/lib/stores/toasts";
 
-export function DropOverlay({ chatId: _chatId }: { chatId: string }) {
+export function DropOverlay({ chatId }: { chatId: string }) {
   const ready = useSetup((s) => s.phase === "ready");
-  const setAttachment = useAttachment((s) => s.set);
+  const selectAttachment = useAttachment((s) => s.select);
+  const pushToast = useToasts((s) => s.push);
   const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
@@ -32,12 +34,19 @@ export function DropOverlay({ chatId: _chatId }: { chatId: string }) {
       depth = 0;
       setDragging(false);
       const file = e.dataTransfer?.files?.[0];
-      if (!file || !file.type.startsWith("image/")) return;
+      if (!file) return;
       try {
-        const r = await persistAttachment(file);
-        if (r) setAttachment(r.path, r.name);
-      } catch {
-        /* surfaced in console; UI silently ignores */
+        if (!chatAcceptsAttachments(chatId)) return;
+        await selectAttachment(
+          chatId,
+          file,
+          () => chatAcceptsAttachments(chatId),
+        );
+      } catch (error) {
+        pushToast(
+          `Could not attach image: ${error instanceof Error ? error.message : String(error)}`,
+          8000,
+        );
       }
     };
 
@@ -51,7 +60,7 @@ export function DropOverlay({ chatId: _chatId }: { chatId: string }) {
       window.removeEventListener("dragover", onOver);
       window.removeEventListener("drop", onDrop);
     };
-  }, [ready, setAttachment]);
+  }, [chatId, pushToast, ready, selectAttachment]);
 
   return (
     <AnimatePresence>
@@ -65,7 +74,7 @@ export function DropOverlay({ chatId: _chatId }: { chatId: string }) {
         >
           <div className="glass-panel rounded-2xl border-2 border-dashed border-accent w-full h-full flex flex-col items-center justify-center gap-3 text-accent">
             <ImagePlus className="w-8 h-8" />
-            <p className="text-sm font-medium">Drop to start image-to-image</p>
+            <p className="text-sm font-medium">Drop a PNG or JPEG to edit</p>
           </div>
         </motion.div>
       )}

@@ -2,7 +2,6 @@
 
 import { useTierWarning } from "@/lib/effects/tier-warning";
 import { Sidebar } from "./Sidebar";
-import { ToastHost } from "./ToastHost";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   useTierWarning();
@@ -10,7 +9,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="h-screen w-screen flex bg-background text-foreground overflow-hidden">
       <Sidebar />
       <main className="flex-1 min-w-0 h-full relative">{children}</main>
-      <ToastHost />
     </div>
   );
 }

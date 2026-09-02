@@ -1,90 +1,37 @@
-# 00 — Architecture Overview
+# 00 — Current Architecture
 
-## Product
+SovImage is a local-only Tauri desktop app. The production frontend is a
+static Next export; Rust owns hardware detection, model download/integrity,
+generation lifecycle, and the bundled `stable-diffusion.cpp` child process.
 
-SovImage: open-source, fully-local AI image generation desktop app. Powered
-by Flux.1 GGUF models running under `stable-diffusion.cpp` as a Tauri sidecar.
-Zero terminal, one-click install.
-
-## Layered architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  React 19 / Next.js 16 (static export)                          │
-│  ─ Chat UI · Sidebar · Splash · Settings · About                │
-│  ─ Tailwind 4 tokens · Framer Motion · lucide-react             │
-└────────────────────────────┬────────────────────────────────────┘
-                             │ Tauri IPC (invoke + event channel)
-┌────────────────────────────▼────────────────────────────────────┐
-│  Tauri 2 Rust core (tokio async runtime)                        │
-│  ─ Hardware profiler        (sysctl / NVML)                     │
-│  ─ Resilient downloader     (reqwest + HTTP Range + SHA256)     │
-│  ─ Sidecar supervisor       (spawn sd.cpp, lifecycle)           │
-│  ─ Generation orchestrator  (queue, cancel, progress events)    │
-│  ─ tauri-plugin-sql         (SQLite WAL, migrations)            │
-│  ─ tauri-plugin-fs/dialog   (drop-target, image save)           │
-└────────────────────────────┬────────────────────────────────────┘
-                             │ stdio JSON-RPC / argv
-┌────────────────────────────▼────────────────────────────────────┐
-│  sd.cpp sidecar (Metal arm64 · CUDA win-x64)                    │
-│  ─ Loads Flux.1 GGUF                                            │
-│  ─ Emits progress, returns PNG bytes                            │
-└─────────────────────────────────────────────────────────────────┘
+```text
+React UI
+  ├─ Tauri events and narrow commands
+  ├─ tauri-plugin-sql → local SQLite
+  └─ dialog-scoped/app-data filesystem access
+            │
+Rust runtime│
+  ├─ conservative Apple unified-memory / unambiguous NVIDIA UUID probe
+  ├─ immutable-revision downloader + length/SHA-256 verification
+  ├─ one-generation queue, pre-spawn reservation, cancellation, terminal events
+  └─ bundled sd helper → Metal or CUDA → app-data PNG
 ```
 
-## Repository layout (target)
+The 0.2.0 model contract is one Apache-2.0 family for generation and reference
+editing: FLUX.2 Klein 4B, FLUX.2 small decoder, and Qwen3-4B. Text-only and
+reference-image requests share the same pack; editing adds `--ref-image`.
 
-```
-SovImage/
-├── frontend/                 Next.js 16 app (static export)
-│   ├── src/app/              App Router routes (/, /settings, /about)
-│   ├── src/components/       Sidebar, ChatView, Splash, Bubble, …
-│   ├── src/lib/              ipc.ts, db.ts, theme.ts, types.ts
-│   ├── src-tauri/            Rust shell
-│   │   ├── src/
-│   │   │   ├── main.rs
-│   │   │   ├── commands/     ipc handlers
-│   │   │   ├── downloader/   resilient HTTP Range
-│   │   │   ├── hardware/     RAM/VRAM probe
-│   │   │   ├── sidecar/      sd.cpp supervisor
-│   │   │   └── db/           migrations
-│   │   └── tauri.conf.json
-│   ├── package.json
-│   └── tailwind / postcss / tsconfig …
-├── plan/                     This dir
-├── docs/                     Public docs (no AI markers)
-├── README.md
-├── LICENSE                   MIT or Apache-2.0
-└── .gitignore                Excludes CLAUDE.md and AI traces
-```
+Security boundaries:
 
-## Current sprint scope
+- The webview cannot execute the sidecar. Rust resolves and launches it.
+- CSP permits packaged assets, local asset-protocol reads, and Tauri IPC only.
+- File access is app-data plus paths selected through the OS dialog.
+- Prompts use private temporary files, not process arguments.
+- Model URLs, exact lengths, and hashes are compiled into Rust.
 
-**Frontend + Tauri shell skeleton only.** Rust subsystems (downloader,
-sidecar) get stubs that emit mocked progress events so UI is wirable now and
-swappable later. Plans 03 & 04 specify final behavior.
+Distribution has two separate macOS contracts: Developer ID/notarized DMG for
+direct download, and sandboxed Apple Distribution `.app` plus Installer-signed
+`.pkg` for the Mac App Store. The App Store helper inherits the parent sandbox.
+Windows uses NSIS, Authenticode, and a bundled CUDA/cuBLAS runtime closure.
 
-## Tech decisions / trade-offs
-
-- **Next.js static export** (`output: "export"`) over plain Vite: keeps the
-  SovLens DX (App Router, fonts, RSC where useful) while producing a flat
-  `out/` Tauri can bundle. No server runtime in production.
-- **Tailwind 4 + CSS variables** match SovLens design system exactly.
-- **Framer Motion** for splash + bubble enter animations only — not for
-  layout. Avoids re-render storms on chat streams.
-- **lucide-react** matches SovLens icon set.
-- **tauri-plugin-sql** > raw rusqlite: gives JS-side typed API and built-in
-  migration runner.
-- **No state library yet.** Local component state + a few Zustand stores
-  if needed. Avoid Redux.
-
-## Cross-cutting invariants
-
-- All Tauri commands are `async` and return `Result<T, AppError>` where
-  `AppError` is a serializable enum. UI never sees a string panic.
-- All file writes happen under `tauri::path::app_data_dir()` — never the
-  bundle dir, never the user's home.
-- All long-running ops emit progress on a typed channel
-  (`tauri::Window::emit`). UI subscribes via `listen`.
-- No remote URL is constructed from untrusted input. Model URLs are constants
-  in `src-tauri/src/downloader/registry.rs`.
+See `CURRENT.md` for authoritative status and `BUILDING.md` for runnable gates.

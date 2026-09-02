@@ -1,59 +1,129 @@
 name: ci
 
 on:
+  workflow_call:
   push:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
-env:
-  NODE_VERSION: 20
-
 jobs:
-  frontend:
-    name: frontend (typecheck + build)
-    runs-on: ubuntu-22.04
+  release-contract:
+    name: release configuration
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate configs, plists, icons, and scripts
+        shell: bash
+        run: |
+          python3 scripts/verify-release-assets.py
+          bash -n scripts/*.sh
+          pwsh -NoProfile -Command 'Get-ChildItem scripts/*.ps1 | ForEach-Object { [scriptblock]::Create((Get-Content -Raw $_.FullName)) | Out-Null }'
 
-      - uses: actions/setup-node@v4
+  frontend:
+    name: frontend
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          node-version-file: .node-version
+          cache: npm
           cache-dependency-path: frontend/package-lock.json
-
+      - name: Verify Node/npm toolchain
+        run: node scripts/verify-node-toolchain.mjs
       - name: Install
         working-directory: frontend
         run: npm ci
-
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
       - name: Typecheck
         working-directory: frontend
         run: npx tsc --noEmit
-
-      - name: Build (Next.js static export)
+      - name: Test
+        working-directory: frontend
+        run: npm test
+      - name: Build static frontend
         working-directory: frontend
         run: npm run build
 
-      - name: Lint
-        working-directory: frontend
-        run: npx eslint .
-
   rust:
-    name: rust (cargo check)
-    runs-on: macos-14
+    name: rust + engine contract
+    runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          submodules: recursive
+      - id: engine
+        name: Resolve pinned engine commit
+        shell: bash
+        run: echo "sha=$(git -C vendor/stable-diffusion.cpp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - id: toolchain
+        name: Fingerprint native toolchain
+        shell: bash
+        run: echo "value=$(bash scripts/native-toolchain-fingerprint.sh)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: engine-cache
+        with:
+          path: |
+            vendor/sdcpp-build-mac
+            frontend/src-tauri/binaries/sd-aarch64-apple-darwin
+          key: sdcpp-aarch64-apple-darwin-${{ steps.toolchain.outputs.value }}-${{ steps.engine.outputs.sha }}-${{ hashFiles('scripts/native-toolchain-fingerprint.sh', 'scripts/build-sdcpp-mac.sh', 'scripts/verify-sdcpp-cli.sh') }}
+      - name: Build pinned sd.cpp
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        run: scripts/build-sdcpp-mac.sh
+      - name: Verify pinned sd.cpp CLI
+        run: scripts/verify-sdcpp-cli.sh frontend/src-tauri/binaries/sd-aarch64-apple-darwin '${{ steps.engine.outputs.sha }}'
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # action pin; toolchain 1.98.0
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
           targets: aarch64-apple-darwin
-
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          workspaces: 'frontend/src-tauri -> target'
-
-      - name: cargo check
+          workspaces: frontend/src-tauri -> target
+          shared-key: aarch64-apple-darwin
+      - name: Format
         working-directory: frontend/src-tauri
-        run: cargo check --target aarch64-apple-darwin
+        run: cargo fmt --check
+      - name: Clippy
+        working-directory: frontend/src-tauri
+        run: cargo clippy --locked --all-targets --no-default-features --features real_runtime -- -D warnings
+      - name: Test real runtime
+        working-directory: frontend/src-tauri
+        run: cargo test --locked --no-default-features --features real_runtime
+      - name: Test stub runtime
+        working-directory: frontend/src-tauri
+        run: cargo test --locked --no-default-features --features stub_runtime
+      - name: Release check
+        working-directory: frontend/src-tauri
+        run: cargo check --locked --release --no-default-features --features real_runtime
+
+  rust-windows:
+    name: rust (Windows)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # action pin; toolchain 1.98.0
+        with:
+          toolchain: 1.98.0
+      - uses: swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: frontend/src-tauri -> target
+          shared-key: x86_64-pc-windows-msvc
+      - name: Provision non-executed external-bin placeholder
+        shell: pwsh
+        run: Set-Content -NoNewline frontend/src-tauri/binaries/sd-x86_64-pc-windows-msvc.exe stub
+      - name: Check Windows-only runtime code
+        working-directory: frontend/src-tauri
+        run: cargo check --locked --all-targets --no-default-features --features real_runtime
+      - name: Test Windows runtime contracts
+        working-directory: frontend/src-tauri
+        run: cargo test --locked --no-default-features --features real_runtime

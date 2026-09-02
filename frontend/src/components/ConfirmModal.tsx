@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useId, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -24,6 +25,44 @@ export function ConfirmModal({
   onCancel,
   onConfirm,
 }: Props) {
+  const panel = useRef<HTMLDivElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const frame = requestAnimationFrame(() => cancelButton.current?.focus());
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = panel.current?.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+      );
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", onKeyDown);
+      previous?.focus();
+    };
+  }, [onCancel, open]);
+
   return (
     <AnimatePresence>
       {open && (
@@ -37,6 +76,7 @@ export function ConfirmModal({
           onClick={onCancel}
         >
           <motion.div
+            ref={panel}
             initial={{ opacity: 0, y: 8, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
@@ -45,20 +85,26 @@ export function ConfirmModal({
             className="glass-panel rounded-2xl p-5 w-[360px] max-w-[90vw] flex flex-col gap-3"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="confirm-title"
+            aria-labelledby={titleId}
+            aria-describedby={descriptionId}
           >
-            <h2 id="confirm-title" className="text-sm font-semibold">
+            <h2 id={titleId} className="text-sm font-semibold">
               {title}
             </h2>
-            <p className="text-xs text-muted-text">{message}</p>
+            <p id={descriptionId} className="text-xs text-muted-text">
+              {message}
+            </p>
             <div className="flex justify-end gap-2 mt-2">
               <button
+                ref={cancelButton}
+                type="button"
                 onClick={onCancel}
                 className="glass-soft rounded-lg px-3 py-1.5 text-xs hover:text-accent transition-colors"
               >
                 {cancelLabel}
               </button>
               <button
+                type="button"
                 onClick={onConfirm}
                 className={cn(
                   "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",

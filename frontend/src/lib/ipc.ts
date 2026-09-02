@@ -1,249 +1,198 @@
 "use client";
 
-import type {
-  DownloadProgress,
-  GenerationEvent,
-  GenerationMeta,
-  Message,
-  SetupState,
-} from "./types";
+import type { GenerationEvent, GenerationMeta, SetupState } from "./types";
 
-// ---------------------------------------------------------------------------
-// IPC = the *narrow* surface that crosses into Rust: setup + generation. All
-// chat/message/settings persistence goes through `lib/db.ts` (plugin-sql),
-// not through here.
-// ---------------------------------------------------------------------------
-
-async function tauriCore() {
-  if (typeof window === "undefined") return null;
-  if (!("__TAURI_INTERNALS__" in window)) return null;
-  return await import("@tauri-apps/api/core");
-}
-
-async function tauriEvent() {
-  if (typeof window === "undefined") return null;
-  if (!("__TAURI_INTERNALS__" in window)) return null;
-  return await import("@tauri-apps/api/event");
+export function isTauriRuntime() {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  const t = await tauriCore();
-  if (t) return t.invoke<T>(cmd, args);
+  if (isTauriRuntime()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<T>(cmd, args);
+  }
   return mock<T>(cmd, args);
 }
 
 export const ipc = {
   setupState: () => call<SetupState>("setup_state"),
   setupStartDownload: () => call<void>("setup_start_download"),
+  setupEstimateSize: (tier: number) =>
+    call<number>("setup_estimate_size", { tier }),
+  setupConfirmDownload: () => call<void>("setup_confirm_download"),
   setupPause: () => call<void>("setup_pause"),
   setupResume: () => call<void>("setup_resume"),
   setupRetry: () => call<void>("setup_retry"),
-
   generateImage: (input: {
-    chatId: string;
+    messageId: string;
     prompt: string;
-    initImagePath: string | null;
-    meta: Partial<GenerationMeta>;
-  }) => call<Message>("generate_image", input),
+    initImagePath?: string | null;
+    meta?: Partial<Pick<GenerationMeta, "seed" | "width" | "height">> | null;
+  }) => call<void>("generate_image", input),
   cancelGeneration: (messageId: string) =>
     call<void>("cancel_generation", { messageId }),
+  obsoleteModelInventory: () =>
+    call<ObsoleteModelInventory>("obsolete_model_inventory"),
+  cleanupObsoleteModels: () =>
+    call<ObsoleteModelInventory>("cleanup_obsolete_models"),
+  migrateLocalStorage: () =>
+    call<LocalStorageMigration>("migrate_local_storage"),
 };
 
-export async function onDownloadProgress(
-  cb: (p: DownloadProgress) => void,
-): Promise<() => void> {
-  const ev = await tauriEvent();
-  if (!ev) return mockDownloadStream(cb);
-  const un = await ev.listen<DownloadProgress>("download://progress", (e) =>
-    cb(e.payload),
-  );
-  return un;
+export interface ObsoleteModelInventory {
+  bytes: number;
+  files: string[];
 }
 
-export async function onSetupPhase(
-  cb: (p: SetupState["phase"]) => void,
+export interface LocalStorageMigration {
+  oldRoot: string;
+  newRoot: string;
+  localMediaFiles: string[];
+  movedBytes: number;
+}
+
+export async function onSetupState(
+  cb: (state: SetupState) => void,
 ): Promise<() => void> {
-  const ev = await tauriEvent();
-  if (!ev) return () => {};
-  const un = await ev.listen<SetupState["phase"]>("setup://phase", (e) =>
-    cb(e.payload),
-  );
-  return un;
+  if (!isTauriRuntime()) {
+    mockSetupCallbacks.add(cb);
+    return () => mockSetupCallbacks.delete(cb);
+  }
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<SetupState>("setup://state", (event) => cb(event.payload));
 }
 
 export async function onGenerationEvent(
   messageId: string,
-  cb: (e: GenerationEvent) => void,
+  cb: (event: GenerationEvent) => void,
 ): Promise<() => void> {
-  const ev = await tauriEvent();
-  if (!ev) {
-    return mockGenerationStream(messageId, cb);
+  if (!isTauriRuntime()) {
+    mockGenerationCallbacks.set(messageId, cb);
+    return () => {
+      mockGenerationCallbacks.delete(messageId);
+      const job = mockGenerationJobs.get(messageId);
+      if (job) clearTimeout(job);
+      mockGenerationJobs.delete(messageId);
+    };
   }
-  const un = await ev.listen<GenerationEvent>(
-    `generation://${messageId}`,
-    (e) => cb(e.payload),
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<GenerationEvent>(`generation://${messageId}`, (event) =>
+    cb(event.payload),
   );
-  return un;
 }
 
-// ---------------------------------------------------------------------------
-// Browser-dev mock: setup phase loop + fake generation completion. The chat
-// persistence path is handled by the memory driver in lib/db.ts; we only
-// need to fake the event channels here.
-// ---------------------------------------------------------------------------
-
-interface MockSetup extends SetupState {}
-const setupStore: MockSetup = {
+// Browser preview deliberately does not copy production model manifests.
+// It reports itself as a mock runtime and only exercises the UI contract.
+const mockSetup: SetupState = {
   phase: "idle",
   tier: null,
-  modelId: null,
+  modelId: "browser-preview",
   downloaded: 0,
   total: 0,
   bytesPerSec: 0,
   etaSecs: 0,
   error: null,
   supported: true,
-  device: "Browser dev (mocked)",
+  device: "Browser preview (no inference engine)",
 };
+const mockSetupCallbacks = new Set<(state: SetupState) => void>();
+const mockGenerationCallbacks = new Map<
+  string,
+  (event: GenerationEvent) => void
+>();
+const mockGenerationJobs = new Map<string, ReturnType<typeof setTimeout>>();
 
-const downloadCallbacks = new Set<(p: DownloadProgress) => void>();
-let mockDownloadActive = false;
-
-function mockDownloadStream(cb: (p: DownloadProgress) => void) {
-  downloadCallbacks.add(cb);
-  return () => downloadCallbacks.delete(cb);
+function emitMockSetup() {
+  const snapshot = { ...mockSetup };
+  mockSetupCallbacks.forEach((cb) => cb(snapshot));
 }
-function emitDownload(p: DownloadProgress) {
-  downloadCallbacks.forEach((cb) => cb(p));
-}
 
-function mockGenerationStream(
-  _messageId: string,
-  cb: (e: GenerationEvent) => void,
-): () => void {
-  let cancelled = false;
-  let steps = 0;
+function startMockGeneration(messageId: string, mode: GenerationMeta["mode"]) {
+  const callback = mockGenerationCallbacks.get(messageId);
+  if (!callback) throw new Error("generation listener is not attached");
+  let step = 0;
   const total = 4;
   const tick = () => {
-    if (cancelled) return;
-    steps++;
-    if (steps <= total) {
-      cb({ id: _messageId, event: "step", step: steps, total });
-      setTimeout(tick, 300);
-    } else {
-      const svg = placeholderSvg(`#${_messageId.slice(0, 6)}`);
-      cb({
-        id: _messageId,
-        event: "done",
-        imagePath: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
-      });
+    step++;
+    if (step <= total) {
+      callback({ event: "step", step, total });
+      mockGenerationJobs.set(messageId, setTimeout(tick, 250));
+      return;
     }
+    const svg = placeholderSvg(`#${messageId.slice(0, 6)}`);
+    const meta: GenerationMeta = {
+      model: "browser-preview",
+      mode,
+      seed: 0,
+      width: 1024,
+      height: 1024,
+      steps: total,
+      cfg: 1,
+      guidance: 3.5,
+      sampler: "euler",
+    };
+    callback({
+      event: "done",
+      imagePath: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+      meta,
+    });
+    mockGenerationJobs.delete(messageId);
   };
-  setTimeout(tick, 400);
-  return () => {
-    cancelled = true;
-  };
+  mockGenerationJobs.set(messageId, setTimeout(tick, 250));
 }
 
 async function mock<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  await new Promise((r) => setTimeout(r, 30));
+  await new Promise((resolve) => setTimeout(resolve, 20));
   switch (cmd) {
     case "setup_state":
-      return setupStore as unknown as T;
-    case "setup_start_download": {
-      if (mockDownloadActive) return undefined as unknown as T;
-      mockDownloadActive = true;
-      const total = 6_500_000_000;
-      Object.assign(setupStore, {
-        phase: "profiling",
-        tier: 3,
-        modelId: "flux1-dev-q8_0",
-        total,
-      });
-      setTimeout(() => {
-        setupStore.phase = "downloading";
-        let downloaded = 0;
-        const chunk = total / 80;
-        const interval = setInterval(() => {
-          downloaded = Math.min(total, downloaded + chunk);
-          setupStore.downloaded = downloaded;
-          setupStore.bytesPerSec = chunk * 10;
-          setupStore.etaSecs = Math.max(
-            0,
-            Math.round((total - downloaded) / (chunk * 10)),
-          );
-          emitDownload({
-            modelId: "flux1-dev-q8_0",
-            downloaded,
-            total,
-            bytesPerSec: setupStore.bytesPerSec,
-            etaSecs: setupStore.etaSecs,
-          });
-          if (downloaded >= total) {
-            clearInterval(interval);
-            setupStore.phase = "verifying";
-            setTimeout(() => {
-              setupStore.phase = "starting_sidecar";
-              setTimeout(() => {
-                setupStore.phase = "ready";
-                mockDownloadActive = false;
-              }, 400);
-            }, 600);
-          }
-        }, 80);
-      }, 500);
-      return undefined as unknown as T;
-    }
-    case "setup_pause":
-    case "setup_resume":
-      return undefined as unknown as T;
+      return { ...mockSetup } as T;
+    case "setup_estimate_size":
+      return 0 as T;
+    case "setup_start_download":
     case "setup_retry":
-      Object.assign(setupStore, {
-        phase: "idle",
-        downloaded: 0,
-        bytesPerSec: 0,
-        etaSecs: 0,
-        error: null,
-      });
-      return undefined as unknown as T;
-
-    case "generate_image": {
-      // Returns a transient placeholder; the chats store inserts the row
-      // into the (memory) DB itself. Browser-mock has no real spawn.
-      const out: Message = {
-        id: crypto.randomUUID(),
-        chatId: args!.chatId as string,
-        role: "assistant",
-        kind: "image",
-        content: null,
-        imagePath: null,
-        meta: null,
-        parentId: null,
-        status: "pending",
-        createdAt: new Date().toISOString(),
-      };
-      return out as unknown as T;
+      Object.assign(mockSetup, { phase: "profiling", error: null });
+      emitMockSetup();
+      setTimeout(() => {
+        mockSetup.phase = "ready";
+        emitMockSetup();
+      }, 150);
+      return undefined as T;
+    case "setup_confirm_download":
+    case "setup_resume":
+      mockSetup.phase = "ready";
+      emitMockSetup();
+      return undefined as T;
+    case "setup_pause":
+      return undefined as T;
+    case "generate_image":
+      startMockGeneration(
+        String(args?.messageId),
+        args?.initImagePath ? "edit" : "txt2img",
+      );
+      return undefined as T;
+    case "cancel_generation": {
+      const id = String(args?.messageId);
+      const job = mockGenerationJobs.get(id);
+      if (job) clearTimeout(job);
+      mockGenerationJobs.delete(id);
+      mockGenerationCallbacks.get(id)?.({ event: "cancelled" });
+      return undefined as T;
     }
-    case "cancel_generation":
-      return undefined as unknown as T;
+    case "obsolete_model_inventory":
+    case "cleanup_obsolete_models":
+      return { bytes: 0, files: [] } as T;
+    case "migrate_local_storage":
+      return {
+        oldRoot: "browser-preview",
+        newRoot: "browser-preview",
+        localMediaFiles: [],
+        movedBytes: 0,
+      } as T;
+    default:
+      throw new Error(`unknown ipc command: ${cmd}`);
   }
-  throw new Error(`unknown ipc cmd: ${cmd}`);
 }
 
-function placeholderSvg(prompt: string) {
-  const t = (prompt || "preview").slice(0, 60);
-  return `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'>
-    <defs><linearGradient id='g' x1='0' x2='1' y1='0' y2='1'>
-      <stop offset='0%' stop-color='#00b9a0'/>
-      <stop offset='100%' stop-color='#005b56'/>
-    </linearGradient></defs>
-    <rect width='1024' height='1024' fill='url(#g)'/>
-    <text x='50%' y='50%' fill='white' font-family='sans-serif' font-size='42'
-      text-anchor='middle' dominant-baseline='middle'>${escapeXml(t)}</text>
-  </svg>`;
-}
-function escapeXml(s: string) {
-  return s.replace(/[<>&'"]/g, (c) =>
-    c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === "&" ? "&amp;" : c === "'" ? "&apos;" : "&quot;",
-  );
+function placeholderSvg(label: string) {
+  return `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'><defs><linearGradient id='g' x1='0' x2='1' y1='0' y2='1'><stop offset='0%' stop-color='#00b9a0'/><stop offset='100%' stop-color='#005b56'/></linearGradient></defs><rect width='1024' height='1024' fill='url(#g)'/><text x='50%' y='50%' fill='white' font-family='sans-serif' font-size='42' text-anchor='middle' dominant-baseline='middle'>${label}</text></svg>`;
 }

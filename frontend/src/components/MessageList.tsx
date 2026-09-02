@@ -20,6 +20,11 @@ export function MessageList({
   const messages = useChats((s) => s.messages[chatId] ?? EMPTY_MESSAGES);
   const ref = useRef<HTMLDivElement>(null);
   const bubbleRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const nearBottom = useRef(true);
+
+  useEffect(() => {
+    nearBottom.current = true;
+  }, [chatId]);
 
   // Trigger on length AND on the last message's status — the pending→done
   // transition is in-place (length unchanged) but inserts a real image
@@ -30,6 +35,7 @@ export function MessageList({
     // Don't auto-scroll to bottom when we're trying to land on a specific
     // message from a search hit.
     if (scrollToMessageId) return;
+    if (!nearBottom.current) return;
     const el = ref.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
@@ -43,6 +49,17 @@ export function MessageList({
     node.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [scrollToMessageId, messages.length]);
 
+  useEffect(() => {
+    const handle = (event: Event) => {
+      const messageId = (event as CustomEvent<string>).detail;
+      bubbleRefs.current
+        .get(messageId)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    window.addEventListener("sovimage:scroll-message", handle);
+    return () => window.removeEventListener("sovimage:scroll-message", handle);
+  }, []);
+
   const registerRef = (id: string) => (el: HTMLDivElement | null) => {
     if (el) bubbleRefs.current.set(id, el);
     else bubbleRefs.current.delete(id);
@@ -51,6 +68,11 @@ export function MessageList({
   return (
     <div
       ref={ref}
+      onScroll={(event) => {
+        const element = event.currentTarget;
+        nearBottom.current =
+          element.scrollHeight - element.scrollTop - element.clientHeight <= 80;
+      }}
       className="flex-1 min-h-0 overflow-y-auto px-6 py-6 flex flex-col gap-4"
     >
       {messages.map((m) => (

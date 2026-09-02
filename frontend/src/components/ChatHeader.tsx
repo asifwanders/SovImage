@@ -1,25 +1,46 @@
 "use client";
 
-import { MoreHorizontal, Pencil } from "lucide-react";
-import { useState } from "react";
+import { Pencil } from "lucide-react";
+import { useRef, useState } from "react";
 import { useChats } from "@/lib/stores/chats";
 import { useSetup } from "@/lib/stores/setup";
+import { useToasts } from "@/lib/stores/toasts";
 
 export function ChatHeader({ chatId }: { chatId: string }) {
   const chat = useChats((s) => s.chats.find((c) => c.id === chatId));
   const rename = useChats((s) => s.rename);
   const modelId = useSetup((s) => s.modelId);
+  const pushToast = useToasts((s) => s.push);
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(chat?.title ?? "");
+  const editingFinished = useRef(false);
+  const editGeneration = useRef(0);
 
   if (!chat) return null;
 
-  const commit = async () => {
-    if (draft.trim() && draft.trim() !== chat.title) {
-      await rename(chat.id, draft.trim());
-    }
+  const finishEdit = async (save: boolean) => {
+    if (editingFinished.current) return;
+    editingFinished.current = true;
+    const title = draft.trim();
+    const original = chat.title;
+    const id = chat.id;
+    const generation = editGeneration.current;
     setEditing(false);
+    if (!save || !title || title === original) return;
+    try {
+      await rename(id, title);
+    } catch (error) {
+      if (editGeneration.current === generation) {
+        editingFinished.current = false;
+        setDraft(title);
+        setEditing(true);
+      }
+      pushToast(
+        `Could not rename chat: ${error instanceof Error ? error.message : String(error)}`,
+        8000,
+      );
+    }
   };
 
   return (
@@ -29,18 +50,28 @@ export function ChatHeader({ chatId }: { chatId: string }) {
           <input
             autoFocus
             value={draft}
+            maxLength={200}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") commit();
-              if (e.key === "Escape") setEditing(false);
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                void finishEdit(true);
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                void finishEdit(false);
+              }
             }}
-            onBlur={commit}
+            onBlur={() => void finishEdit(true)}
             className="bg-transparent outline-none text-sm font-medium flex-1 min-w-0"
             aria-label="Chat title"
           />
         ) : (
           <button
+            aria-label={`Rename chat ${chat.title}`}
             onClick={() => {
+              editGeneration.current++;
+              editingFinished.current = false;
               setDraft(chat.title);
               setEditing(true);
             }}
@@ -58,12 +89,6 @@ export function ChatHeader({ chatId }: { chatId: string }) {
         </span>
       )}
 
-      <button
-        className="p-1.5 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
-        aria-label="More"
-      >
-        <MoreHorizontal className="w-4 h-4 text-muted-text" />
-      </button>
     </header>
   );
 }

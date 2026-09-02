@@ -1,51 +1,68 @@
 # Changelog
 
-All notable changes to SovImage will be documented here. Format loosely
-follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); semver
-applies post-1.0.
+SovImage follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Pre-1.0 releases may contain breaking storage or model changes.
 
 ## [Unreleased]
 
-### Added
-- Initial scaffold: Tauri 2 + Next.js 16 + React 19 + Tailwind 4 frontend.
-- Liquid-glass chat UI: sidebar w/ collapse + chat CRUD, splash screen
-  with progress bar + pause/resume/retry, settings, about.
-- Sidebar inherits SovLens design tokens (`#00b9a0` accent, dark/light
-  themes, glass panels, Ubuntu @ 13 px base).
-- Image bubbles: pending shimmer, success w/ hover actions, error state,
-  cancel button while pending.
-- Hardware profiler module: macOS unified memory via `sysctl hw.memsize`,
-  Windows NVIDIA VRAM via NVML w/ `GlobalMemoryStatusEx` fallback.
-- Tiered model selection (Tier 1 < 12 GB, Tier 2 12–16 GB, Tier 3 > 16 GB).
-- Resilient downloader: HTTP Range resume, persistent `*.part.json` state,
-  SHA256 verification, exponential backoff, ETag-aware re-validation.
-- SQLite via `tauri-plugin-sql` w/ FTS5 search index; frontend talks to
-  the DB directly through a thin Driver facade (`lib/db.ts`).
-- sd.cpp sidecar supervisor: per-tier argv builder (`--vae-on-cpu`,
-  `--clip-on-cpu`, `--vae-tiling`, etc. for tier 1), stderr step parser
-  for 3 sd.cpp output formats, per-message cancellation via `tokio::select!`,
-  generation semaphore (1 in-flight).
-- GitHub Actions release workflow: matrix `macos-14` (aarch64 / Metal) +
-  `windows-2022` (x86_64 / CUDA 12.5). Builds sd.cpp from pinned
-  submodule, uploads sidecar artifact, runs `tauri-action` to produce
-  `.dmg` + `.msi`/`.exe`. Signing slots wired but optional (unsigned
-  builds for pre-alpha).
-- Browser-dev mock layer in `lib/ipc.ts` + `lib/db.ts` (memory driver)
-  so the UI runs under `next dev` without Tauri or sd.cpp.
-- Model registry w/ real SHA256s for all 7 Flux files; ungated mirror
-  used for the BFL-licensed VAE blob.
+## [0.2.0] - 2026-09-02
 
-### Pinned
-- `stable-diffusion.cpp` submodule at `master-645-645e6e9`
-  (`645e6e9089c78bd61368f3a667644fee39e463b6`, 2026-05-22).
+### Changed
 
-### Plans
-- `plan/00-architecture.md` through `plan/08-sidecar-protocol.md`.
-- BUILDING.md, CONTRIBUTING.md, SECURITY.md.
+- Set the application version to 0.2.0.
+- Replaced the FLUX.1-dev/Kontext model set with one commercially usable,
+  Apache-2.0 FLUX.2 Klein 4B generation-and-editing pipeline.
+- Pinned all model URLs to immutable revisions and made expected SHA-256 and
+  byte length mandatory.
+- Updated `stable-diffusion.cpp` to `master-841-6b3edaa`
+  (`6b3edaaf32cc19e5bb2d819c788bd557eddc8eba`).
+- Raised supported hardware to a conservative 12 GiB minimum and separated
+  Apple unified-memory from NVIDIA VRAM selection.
+- Removed model-type overrides and process-argument prompts; generation now
+  uses the pinned engine's FLUX.2 guidance, backend, VRAM-budget, prompt-file,
+  and metadata-disable controls.
+- Updated CI to Node 24, Rust 1.98, and reviewed immutable action SHAs; added
+  real/stub Rust tests, clippy, exact engine CLI/provenance checks,
+  release-resource checks, and upstream drift detection.
+- Pinned Node 24.14.1/npm 11.11.0, fingerprinted native engine caches, and
+  added Windows-only Rust checks to pull-request CI.
+- Limited Tailwind source discovery to `frontend/src`, eliminating repository-
+  wide production-build scans.
 
-### Notes
-- Unsigned installers on both platforms this release. macOS users will
-  need to right-click → Open first launch; Windows users will see
-  SmartScreen. Signing secrets land in 0.2.x.
-- Tier 1 8 GB Apple Silicon: even with all memory-saving flags + Q2_K
-  quantized T5, peak unified memory pushes 7–8 GB. Splash will warn.
+### Security
+
+- Replaced the disabled CSP with a local-only policy and reduced Tauri
+  capabilities to the UI's actual operations.
+- Removed `$HOME/**` and frontend sidecar-execution permission.
+- Escaped search results rather than rendering stored prompt HTML.
+- Added bounded PNG/JPEG attachment validation and terminal generation-state
+  reconciliation.
+- Added full browser decode before attachment persistence, structured hardware
+  rejection reasons, bounded sidecar wait retries, and exact stale-metadata cleanup.
+- Added retained sidecar ownership/reaping, an app-instance GPU lock,
+  APPLOCAL media/model migration, atomic generated-image publication, and
+  bounded setup/generation queues.
+
+### Distribution
+
+- Added a fail-closed direct release lane: ad-hoc/unsigned dry runs, Developer
+  ID signing and notarization, Windows Authenticode, checksums, and draft-only
+  GitHub Releases.
+- Added an independent Mac App Store lane with App Sandbox, outbound network
+  and user-selected-file entitlements, a separately signed inherited helper,
+  provisioning-profile validation, signed `.pkg`, App Store Connect validation,
+  and explicit opt-in upload.
+- Added build provenance, a privacy manifest/policy, third-party notices, an
+  App Store checklist, macOS 12 deployment enforcement, and a seven-resolution
+  Windows icon.
+- App Store packaging now compares every bundled legal/privacy/provenance
+  resource with source and verifies the non-exempt-encryption declaration.
+- Added fail-closed Windows CUDA/cuBLAS runtime-closure construction and
+  installer verification; a clean NVIDIA Windows run remains a release gate.
+- Reworked the app icon/wordmark presentation, accessible contrast, sizing,
+  focus, reduced-motion behavior, and setup/download disclosure.
+
+## [0.1.0-beta.1] - 2026-05-24
+
+Initial Tauri/Next scaffold and unsigned beta workflow. This build is retained
+for history and should not be submitted to an app store.

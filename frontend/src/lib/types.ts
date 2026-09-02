@@ -3,7 +3,9 @@ export type Tier = 1 | 2 | 3;
 export type SetupPhase =
   | "idle"
   | "profiling"
+  | "awaiting_confirm"
   | "downloading"
+  | "paused"
   | "verifying"
   | "starting_sidecar"
   | "ready"
@@ -35,7 +37,12 @@ export interface Chat {
 
 export type MessageRole = "user" | "assistant" | "system";
 export type MessageKind = "text" | "image" | "error";
-export type MessageStatus = "pending" | "done" | "error" | "cancelled";
+export type MessageStatus =
+  | "queued"
+  | "pending"
+  | "done"
+  | "error"
+  | "cancelled";
 
 export interface Message {
   id: string;
@@ -50,10 +57,15 @@ export interface Message {
   createdAt: string;
 }
 
+export type GenerationMode = "txt2img" | "edit";
+
 export interface GenerationMeta {
   model: string;
+  mode: GenerationMode;
   steps: number;
   cfg: number;
+  guidance: number;
+  sampler: string;
   seed: number;
   width: number;
   height: number;
@@ -73,11 +85,10 @@ export interface DownloadProgress {
   etaSecs: number;
 }
 
-export interface GenerationEvent {
-  id: string;
-  event: "step" | "done" | "error";
-  step?: number;
-  total?: number;
-  imagePath?: string;
-  message?: string;
-}
+export type GenerationEvent =
+  | { event: "queued" }
+  | { event: "started" }
+  | { event: "step"; step: number; total: number }
+  | { event: "done"; imagePath: string; meta?: GenerationMeta }
+  | { event: "error"; message?: string }
+  | { event: "cancelled" };

@@ -1,6 +1,8 @@
 # Dependencies
 node_modules/
 .pnpm-store/
+__pycache__/
+*.py[cod]
 
 # Build output
 .next/
@@ -17,6 +19,8 @@ frontend/src-tauri/gen/schemas/
 # Sidecar binaries — built per-target by scripts/build-sdcpp-*.{sh,ps1}.
 # Never commit these (large, target-specific). CI produces them per build.
 frontend/src-tauri/binaries/sd-*
+frontend/src-tauri/binaries/*.dll
+frontend/src-tauri/binaries/sdcpp-runtime-manifest.json
 !frontend/src-tauri/binaries/.gitkeep
 
 # Vendored sd.cpp build artifacts
@@ -35,6 +39,13 @@ downloads/
 .env*.local
 *.pem
 *.key
+*.p8
+*.p12
+*.pfx
+*.PFX
+*.provisionprofile
+frontend/src-tauri/Entitlements.appstore.plist
+frontend/src-tauri/tauri.windows.signing.conf.json
 
 # OS
 .DS_Store
@@ -58,6 +69,7 @@ GEMINI.md
 .cursorrules
 .aider*
 .claude/
+.claude-flow/
 .windsurf/
 plan/.private/
 .copilot/

@@ -1,66 +1,112 @@
 "use client";
 
-import { Ban, Paperclip, SendHorizonal, X } from "lucide-react";
+import { Paperclip, SendHorizonal, X } from "lucide-react";
 import { useRef, useState } from "react";
-import { useChats } from "@/lib/stores/chats";
+import { MAX_ATTACHMENT_BYTES } from "@/lib/image-validation";
+import { isTauriRuntime } from "@/lib/ipc";
 import { useAttachment } from "@/lib/stores/attachment";
-import { useSetup } from "@/lib/stores/setup";
-import { persistAttachment } from "@/lib/attachments";
+import { chatAcceptsAttachments, useChats } from "@/lib/stores/chats";
+import { useToasts } from "@/lib/stores/toasts";
 import { cn } from "@/lib/utils";
 
+function detail(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function Composer({ chatId }: { chatId: string }) {
-  // Avoid subscribing to the entire chats store — typing in the textarea
-  // would re-render Composer on every animation frame coming from
-  // in-flight generation events.
-  const appendUserMessage = useChats((s) => s.appendUserMessage);
-  const generate = useChats((s) => s.generate);
-  // Negative prompt is meaningful only at tier 3 (Flux-dev w/ cfg 3.5);
-  // tiers 1+2 use schnell at cfg 1.0 and ignore negative guidance.
-  const tier = useSetup((s) => s.tier);
-  const showNegative = tier === 3;
-
-  // Pending attachment lives in a tiny standalone store so DropOverlay can
-  // populate it from a top-level drop without prop drilling.
-  const pendingPath = useAttachment((s) => s.pendingPath);
-  const pendingName = useAttachment((s) => s.pendingName);
-  const setAttachment = useAttachment((s) => s.set);
-
+  const appendUserMessage = useChats((state) => state.appendUserMessage);
+  const generate = useChats((state) => state.generate);
+  const draft = useAttachment((state) => state.drafts[chatId]);
+  const selectAttachment = useAttachment((state) => state.select);
+  const settleAttachment = useAttachment((state) => state.settle);
+  const restoreAttachment = useAttachment((state) => state.restore);
+  const commitAttachment = useAttachment((state) => state.commit);
+  const discardAttachment = useAttachment((state) => state.discard);
+  const takeAttachment = useAttachment((state) => state.take);
+  const pushToast = useToasts((state) => state.push);
   const [value, setValue] = useState("");
-  const [negative, setNegative] = useState("");
-  const [showNegInput, setShowNegInput] = useState(false);
   const [busy, setBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const ta = useRef<HTMLTextAreaElement>(null);
-  const negTa = useRef<HTMLTextAreaElement>(null);
+  const textarea = useRef<HTMLTextAreaElement>(null);
 
-  const grow = () => {
-    const el = ta.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 200) + "px";
-  };
-
-  const send = async () => {
-    const trimmed = value.trim();
-    if (!trimmed || busy) return;
-    setBusy(true);
+  const attach = async (input: File | (() => Promise<File>)) => {
+    if (!chatAcceptsAttachments(chatId)) return;
     try {
-      await appendUserMessage(chatId, trimmed);
-      setValue("");
-      const init = pendingPath;
-      const neg = showNegative ? negative.trim() || null : null;
-      setAttachment(null, null);
-      if (ta.current) ta.current.style.height = "auto";
-      await generate(chatId, trimmed, init, neg);
-    } finally {
-      setBusy(false);
+      await selectAttachment(
+        chatId,
+        input,
+        () => chatAcceptsAttachments(chatId),
+      );
+    } catch (error) {
+      pushToast(`Could not attach image: ${detail(error)}`, 8000);
     }
   };
 
-  const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      send();
+  const chooseAttachment = async () => {
+    if (!isTauriRuntime()) {
+      fileInput.current?.click();
+      return;
+    }
+    try {
+      const [{ open }, { readFile, stat }] = await Promise.all([
+        import("@tauri-apps/plugin-dialog"),
+        import("@tauri-apps/plugin-fs"),
+      ]);
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg"] }],
+      });
+      if (!picked || typeof picked !== "string") return;
+      await attach(async () => {
+        const fileStat = await stat(picked);
+        if (fileStat.size > MAX_ATTACHMENT_BYTES) {
+          throw new Error("Images must be 25 MB or smaller.");
+        }
+        const bytes = await readFile(picked);
+        const name = picked.split(/[\\/]/).pop() ?? "image";
+        return new File([bytes], name);
+      });
+    } catch (error) {
+      pushToast(`Could not attach image: ${detail(error)}`, 8000);
+    }
+  };
+
+  const send = async () => {
+    const prompt = value.trim();
+    if (!prompt || busy) return;
+    if (new TextEncoder().encode(prompt).byteLength > 16 * 1024) {
+      pushToast("Prompts must be 16 KB or smaller.");
+      return;
+    }
+    setBusy(true);
+    let reservation: ReturnType<typeof takeAttachment> = null;
+    let messagePersisted = false;
+    try {
+      await settleAttachment(chatId);
+      reservation = takeAttachment(chatId);
+      const attachment = reservation?.draft ?? null;
+      const initImagePath = attachment?.path ?? null;
+      await appendUserMessage(chatId, prompt, initImagePath);
+      messagePersisted = true;
+      if (reservation) commitAttachment(chatId, reservation);
+      setValue("");
+      if (textarea.current) textarea.current.style.height = "auto";
+      await generate(chatId, prompt, initImagePath);
+    } catch (error) {
+      if (reservation && !messagePersisted) {
+        try {
+          await restoreAttachment(chatId, reservation);
+        } catch (cleanupError) {
+          pushToast(
+            `The prompt failed and its attachment could not be restored: ${detail(cleanupError)}`,
+            8000,
+          );
+        }
+      }
+      pushToast(`Could not send prompt: ${detail(error)}`, 8000);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -70,53 +116,35 @@ export function Composer({ chatId }: { chatId: string }) {
         <input
           ref={fileInput}
           type="file"
-          accept="image/*"
+          accept=".png,.jpg,.jpeg,image/png,image/jpeg"
           hidden
-          onChange={async (e) => {
-            const f = e.target.files?.[0];
-            e.target.value = "";
-            if (!f) return;
-            try {
-              const r = await persistAttachment(f);
-              if (r) setAttachment(r.path, r.name);
-            } catch {
-              /* ignore */
-            }
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void attach(file);
           }}
         />
         <button
-          onClick={() => fileInput.current?.click()}
+          type="button"
+          onClick={() => void chooseAttachment()}
           className="p-2 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 text-muted-text hover:text-accent transition-colors shrink-0"
-          aria-label="Attach image"
-          title="Attach image"
+          aria-label="Attach PNG or JPEG"
+          title="Attach PNG or JPEG"
         >
           <Paperclip className="w-4 h-4" />
         </button>
-        {showNegative && (
-          <button
-            onClick={() => {
-              setShowNegInput((v) => !v);
-              setTimeout(() => negTa.current?.focus(), 0);
-            }}
-            className={cn(
-              "p-2 rounded-lg transition-colors shrink-0",
-              showNegInput
-                ? "bg-danger/10 text-danger"
-                : "hover:bg-black/10 dark:hover:bg-white/10 text-muted-text hover:text-danger",
-            )}
-            aria-label="Toggle negative prompt"
-            title={showNegInput ? "Hide negative prompt" : "Add negative prompt"}
-          >
-            <Ban className="w-4 h-4" />
-          </button>
-        )}
 
         <div className="flex-1 min-w-0 flex flex-col">
-          {pendingPath && (
+          {draft && (
             <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-text">
-              <span className="truncate max-w-[200px]">{pendingName ?? "image"}</span>
+              <span className="truncate max-w-[200px]">{draft.name}</span>
               <button
-                onClick={() => setAttachment(null, null)}
+                type="button"
+                onClick={() =>
+                  void discardAttachment(chatId).catch((error) =>
+                    pushToast(`Could not remove attachment: ${detail(error)}`),
+                  )
+                }
                 className="hover:text-danger"
                 aria-label="Remove attachment"
               >
@@ -125,37 +153,45 @@ export function Composer({ chatId }: { chatId: string }) {
             </div>
           )}
           <textarea
-            ref={ta}
+            ref={textarea}
             value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
-              grow();
+            onChange={(event) => {
+              setValue(event.target.value);
+              const element = textarea.current;
+              if (element) {
+                element.style.height = "auto";
+                element.style.height = `${Math.min(element.scrollHeight, 200)}px`;
+              }
             }}
-            onKeyDown={onKey}
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault();
+                void send();
+              }
+            }}
             rows={1}
-            placeholder="Describe an image, or drop one to edit…"
+            maxLength={16 * 1024}
+            placeholder={
+              draft
+                ? "Describe how to edit this image…"
+                : "Describe an image, or drop one to edit…"
+            }
             aria-label="Prompt input"
             className="resize-none bg-transparent outline-none text-sm placeholder:text-muted-text max-h-[200px] leading-relaxed py-1.5"
           />
-          {showNegative && showNegInput && (
-            <textarea
-              ref={negTa}
-              value={negative}
-              onChange={(e) => setNegative(e.target.value)}
-              rows={1}
-              placeholder="Negative prompt (avoid…)"
-              aria-label="Negative prompt"
-              className="resize-none bg-transparent outline-none text-xs text-danger placeholder:text-danger/40 max-h-[120px] leading-relaxed py-1 mt-1 border-t border-panel-border"
-            />
-          )}
         </div>
 
         <button
-          onClick={send}
+          type="button"
+          onClick={() => void send()}
           disabled={!value.trim() || busy}
           aria-busy={busy}
-          aria-label="Send"
-          title="Send"
+          aria-label="Generate image"
+          title="Generate image"
           className={cn(
             "rounded-lg p-2 transition-colors shrink-0",
             value.trim() && !busy

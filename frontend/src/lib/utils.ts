@@ -20,11 +20,15 @@ export function formatEta(secs: number): string {
 }
 
 export function formatRelative(iso: string): string {
-  const d = new Date(iso).getTime();
-  const diff = (Date.now() - d) / 1000;
+  const date = new Date(iso);
+  const timestamp = date.getTime();
+  if (!Number.isFinite(timestamp)) return "Unknown date";
+  const now = Date.now();
+  if (timestamp > now + 60_000) return date.toLocaleDateString();
+  const diff = Math.max(0, (now - timestamp) / 1000);
   if (diff < 60) return "just now";
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}d ago`;
-  return new Date(iso).toLocaleDateString();
+  return date.toLocaleDateString();
 }

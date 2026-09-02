@@ -1,25 +1,22 @@
-# SovImage — Implementation Plan
+# SovImage Plans
 
-| #   | File                         | Topic                                      |
-|-----|------------------------------|--------------------------------------------|
-| 00  | [00-architecture.md](00-architecture.md) | Layered architecture + repo layout     |
-| 01  | [01-frontend-layout.md](01-frontend-layout.md) | React/Next/Tailwind/Framer layout |
-| 02  | [02-sqlite-schema.md](02-sqlite-schema.md) | SQLite schema + FTS5 + migrations      |
-| 03  | [03-rust-downloader.md](03-rust-downloader.md) | Resilient HTTP Range downloader  |
-| 04  | [04-sidecar-orchestration.md](04-sidecar-orchestration.md) | sd.cpp sidecar protocol |
-| 05  | [05-design-system.md](05-design-system.md) | Tokens, components, accessibility    |
-| 06  | [06-sdcpp-execution.md](06-sdcpp-execution.md) | sd.cpp CLI flags + tier matrix + 8 GB M1 survival |
-| 07  | [07-cicd-pipeline.md](07-cicd-pipeline.md) | GitHub Actions release matrix + sd.cpp build jobs |
-| 08  | [08-sidecar-protocol.md](08-sidecar-protocol.md) | Rust supervisor, argv builder, progress parser |
-| —   | [CURRENT.md](CURRENT.md)               | Plan ↔ code drift; what's implemented vs deferred |
+These documents describe current contracts and retired decisions. Code, tests,
+built artifacts, signing services, and device results remain authoritative.
 
-## Sprint scope (superseded)
+| File | Subject |
+|---|---|
+| [00-architecture.md](00-architecture.md) | current layers and trust boundaries |
+| [01-frontend-layout.md](01-frontend-layout.md) | static frontend behavior |
+| [02-sqlite-schema.md](02-sqlite-schema.md) | local persistence/migrations |
+| [03-rust-downloader.md](03-rust-downloader.md) | immutable model download/integrity |
+| [04-sidecar-orchestration.md](04-sidecar-orchestration.md) | retired server draft/current pointer |
+| [05-design-system.md](05-design-system.md) | visual/accessibility rules |
+| [06-sdcpp-execution.md](06-sdcpp-execution.md) | pinned engine and exact CLI |
+| [07-cicd-pipeline.md](07-cicd-pipeline.md) | CI, direct release, App Store |
+| [08-sidecar-protocol.md](08-sidecar-protocol.md) | generation lifecycle |
+| [09-beta-release.md](09-beta-release.md) | 0.1 history and 0.2 gate |
+| [10-flux-image-editing-research.md](10-flux-image-editing-research.md) | superseded model research |
+| [11-kontext-image-editing.md](11-kontext-image-editing.md) | retired Kontext plan |
+| [CURRENT.md](CURRENT.md) | implementation/external-gate status |
 
-Original sprint was frontend + shell skeleton only. As of 2026-05-24 the
-real Rust runtime (downloader, sidecar, hardware probe) is wired and
-tested. See [CURRENT.md](CURRENT.md) for the live status matrix.
-
-## Targets
-
-- macOS arm64 (Apple Silicon) — Metal sd.cpp build
-- Windows x64 — CUDA sd.cpp build (NVIDIA GPUs only)
+Release targets are Apple Silicon/macOS 12+ Metal and Windows x64/NVIDIA CUDA.

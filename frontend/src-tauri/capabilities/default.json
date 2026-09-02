@@ -4,23 +4,37 @@
   "description": "Default capabilities for SovImage windows.",
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    "shell:allow-open",
-    "dialog:default",
-    "fs:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:path:default",
+    "core:window:allow-close",
+    "shell:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "fs:allow-read-file",
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [{ "path": "$RESOURCE/build-provenance.json" }]
+    },
+    "fs:allow-write-file",
+    "fs:allow-copy-file",
+    "fs:allow-mkdir",
+    "fs:allow-exists",
+    "fs:allow-stat",
+    "fs:allow-read-dir",
+    "fs:allow-remove",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$APPLOCALDATA/attachments" },
+        { "path": "$APPLOCALDATA/attachments/**" },
+        { "path": "$APPLOCALDATA/images" },
+        { "path": "$APPLOCALDATA/images/**" }
+      ]
+    },
     "os:allow-platform",
     "os:allow-arch",
-    "os:allow-version",
     "sql:default",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "name": "binaries/sd",
-          "sidecar": true,
-          "args": true
-        }
-      ]
-    }
+    "sql:allow-execute"
   ]
 }

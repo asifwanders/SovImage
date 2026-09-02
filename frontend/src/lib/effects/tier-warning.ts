@@ -11,11 +11,11 @@ import { useToasts } from "@/lib/stores/toasts";
 let warned = false;
 
 const TIER_1_MESSAGE =
-  "8 GB hardware detected. Expect 60–90 s per image; close other apps for best results.";
+  "Lower-memory tier selected. Close other apps before generating for the most reliable performance.";
 
 /**
  * One-shot side effect: when setup reaches `ready` on tier 1, push a single
- * non-blocking toast warning the user about expected generation latency.
+ * non-blocking toast warning the user about memory pressure.
  * Intentionally only watches `phase` + `tier`; user dismissal does not reset
  * the latch.
  */

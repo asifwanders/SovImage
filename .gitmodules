@@ -1,8 +1,9 @@
 [submodule "vendor/stable-diffusion.cpp"]
 	path = vendor/stable-diffusion.cpp
 	url = https://github.com/leejet/stable-diffusion.cpp.git
-	# Pinned to tag `master-645-645e6e9` (commit
-	# 645e6e9089c78bd61368f3a667644fee39e463b6, dated 2026-05-22). This
-	# commit ships full Flux GGUF support (dev + schnell, Q4_0..Q8_0) and
-	# the CLI target is `sd-cli`. Update via `scripts/update-sdcpp.sh`.
+	# Pinned to tag `master-841-6b3edaa` (commit
+	# 6b3edaaf32cc19e5bb2d819c788bd557eddc8eba, dated 2026-08-31).
+	# This is the pinned FLUX.2 Klein CLI baseline. Real generation and editing
+	# remain release gates. Update via an explicit reviewed ref passed to
+	# `scripts/update-sdcpp.sh`.
 	# Bump intentionally — never `git submodule update --remote` in CI.
