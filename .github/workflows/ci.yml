@@ -122,11 +122,16 @@ jobs:
       - name: Provision non-executed external-bin placeholder
         shell: pwsh
         run: |
-          $placeholder = 'frontend/src-tauri/binaries/sd-x86_64-pc-windows-msvc.exe'
+          $root = (Get-Location).Path
+          $placeholder = Join-Path $root 'frontend/src-tauri/binaries/sd-x86_64-pc-windows-msvc.exe'
+          $dll = Join-Path $root 'frontend/src-tauri/binaries/ci-placeholder.dll'
+          $manifest = Join-Path $root 'frontend/src-tauri/binaries/sdcpp-runtime-manifest.json'
           Copy-Item "$env:WINDIR/System32/where.exe" $placeholder
-          Copy-Item "$env:WINDIR/System32/version.dll" frontend/src-tauri/binaries/ci-placeholder.dll
-          Set-Content -NoNewline frontend/src-tauri/binaries/sdcpp-runtime-manifest.json '{}'
-          if (-not (Test-Path $placeholder -PathType Leaf)) { throw 'external-bin placeholder missing' }
+          Copy-Item "$env:WINDIR/System32/version.dll" $dll
+          [IO.File]::WriteAllText($manifest, '{}')
+          foreach ($file in @($placeholder, $dll, $manifest)) {
+            if (-not (Test-Path $file -PathType Leaf)) { throw "compile fixture missing: $file" }
+          }
       - name: Check Windows-only runtime code
         working-directory: frontend/src-tauri
         run: cargo check --locked --all-targets --no-default-features --features real_runtime
