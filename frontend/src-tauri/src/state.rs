@@ -116,12 +116,11 @@ impl AppState {
     }
 
     pub fn release_unspawned_sidecar(&self) {
-        debug_assert!(
-            self.sidecars
-                .lock()
-                .map(|sidecars| sidecars.is_empty())
-                .unwrap_or(false)
-        );
+        debug_assert!(self
+            .sidecars
+            .lock()
+            .map(|sidecars| sidecars.is_empty())
+            .unwrap_or(false));
         self.sidecar_reserved.store(false, Ordering::Release);
     }
 

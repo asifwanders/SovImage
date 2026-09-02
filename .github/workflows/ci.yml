@@ -120,7 +120,10 @@ jobs:
           shared-key: x86_64-pc-windows-msvc
       - name: Provision non-executed external-bin placeholder
         shell: pwsh
-        run: Set-Content -NoNewline frontend/src-tauri/binaries/sd-x86_64-pc-windows-msvc.exe stub
+        run: |
+          $placeholder = 'frontend/src-tauri/binaries/sd-x86_64-pc-windows-msvc.exe'
+          Copy-Item "$env:WINDIR/System32/where.exe" $placeholder
+          if (-not (Test-Path $placeholder -PathType Leaf)) { throw 'external-bin placeholder missing' }
       - name: Check Windows-only runtime code
         working-directory: frontend/src-tauri
         run: cargo check --locked --all-targets --no-default-features --features real_runtime

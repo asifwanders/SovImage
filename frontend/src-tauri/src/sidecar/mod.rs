@@ -425,8 +425,8 @@ fn spawn_sidecar(
                     Err(error) => {
                         failures = failures.saturating_add(1);
                         if report_wait_error(failures) {
-                            let _ = wait_sender
-                                .blocking_send(ProcessEvent::Error(error.to_string()));
+                            let _ =
+                                wait_sender.blocking_send(ProcessEvent::Error(error.to_string()));
                         }
                         thread::sleep(wait_error_delay(failures));
                     }

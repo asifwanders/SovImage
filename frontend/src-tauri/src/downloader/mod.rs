@@ -1188,8 +1188,7 @@ mod tests {
         model.bytes = 4;
         let mut state = State {
             url: serve_once(
-                b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nbad"
-                    .to_vec(),
+                b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nbad".to_vec(),
             )
             .await,
             total: 4,
@@ -1269,13 +1268,22 @@ mod tests {
         let model = spec();
         let stale = format!(".{}.part.json.{}.tmp", model.file, uuid::Uuid::new_v4());
         let legacy = format!("{}.verified", model.file);
-        fs::write(directory.path().join(&stale), b"stale").await.unwrap();
-        fs::write(directory.path().join(&legacy), b"legacy").await.unwrap();
+        fs::write(directory.path().join(&stale), b"stale")
+            .await
+            .unwrap();
+        fs::write(directory.path().join(&legacy), b"legacy")
+            .await
+            .unwrap();
         fs::write(directory.path().join("unrelated.tmp"), b"keep")
             .await
             .unwrap();
 
-        assert_eq!(cleanup_stale_metadata(directory.path(), &[&model]).await.unwrap(), 2);
+        assert_eq!(
+            cleanup_stale_metadata(directory.path(), &[&model])
+                .await
+                .unwrap(),
+            2
+        );
         assert!(!directory.path().join(stale).exists());
         assert!(!directory.path().join(legacy).exists());
         assert!(directory.path().join("unrelated.tmp").exists());
