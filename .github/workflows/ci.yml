@@ -118,11 +118,14 @@ jobs:
         with:
           workspaces: frontend/src-tauri -> target
           shared-key: x86_64-pc-windows-msvc
+          cache-on-failure: true
       - name: Provision non-executed external-bin placeholder
         shell: pwsh
         run: |
           $placeholder = 'frontend/src-tauri/binaries/sd-x86_64-pc-windows-msvc.exe'
           Copy-Item "$env:WINDIR/System32/where.exe" $placeholder
+          Copy-Item "$env:WINDIR/System32/version.dll" frontend/src-tauri/binaries/ci-placeholder.dll
+          Set-Content -NoNewline frontend/src-tauri/binaries/sdcpp-runtime-manifest.json '{}'
           if (-not (Test-Path $placeholder -PathType Leaf)) { throw 'external-bin placeholder missing' }
       - name: Check Windows-only runtime code
         working-directory: frontend/src-tauri
